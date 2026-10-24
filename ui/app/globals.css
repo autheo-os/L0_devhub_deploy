@@ -90,10 +90,12 @@ body {
    just the public landing's decoration. Cover keeps the stencil full-bleed at
    every viewport size, matching the Marketplace surface rather than leaving
    the artwork in a narrow centered column. The fine grid keeps empty portions
-   of the workspace legible. */
+   of the workspace legible. `hero-stencil-day` is byte-identical to the
+   original source artwork; the dedicated night asset preserves its composition
+   while recoloring the same stencil for a dark canvas. */
 body {
   background-image:
-    url("/images/developer-workshop-streetscape.png"),
+    url("/images/hero-stencil-day.png"),
     linear-gradient(to right, hsl(var(--foreground) / 0.01) 1px, transparent 1px),
     linear-gradient(to bottom, hsl(var(--foreground) / 0.01) 1px, transparent 1px);
   background-size: cover, 140px 140px, 140px 140px;
@@ -103,8 +105,13 @@ body {
 }
 .dark body {
   background-image:
+    radial-gradient(ellipse at 72% 54%, rgb(0 255 136 / 0.075), transparent 46%),
+    url("/images/hero-stencil-night.png"),
     linear-gradient(to right, hsl(var(--foreground) / 0.015) 1px, transparent 1px),
     linear-gradient(to bottom, hsl(var(--foreground) / 0.015) 1px, transparent 1px);
+  background-size: cover, cover, 140px 140px, 140px 140px;
+  background-position: center, center 4rem, -1px -1px, -1px -1px;
+  background-repeat: no-repeat, no-repeat, repeat, repeat;
 }
 
 /* ---- Digital network Earth ----
@@ -213,14 +220,34 @@ body {
   border-color: hsl(var(--border));
 }
 
-/* Sleeker, quicker theme + hover transitions. */
+/* Theme and interaction colors transition as one visual system. */
 button,
 a,
 input,
 select {
   transition-property: color, background-color, border-color, opacity, box-shadow;
-  transition-duration: 120ms;
+  transition-duration: 240ms;
   transition-timing-function: ease;
+}
+
+html,
+body,
+header,
+main,
+footer,
+section,
+article,
+aside,
+form,
+[role="dialog"] {
+  transition-property: color, background-color, border-color;
+  transition-duration: 240ms;
+  transition-timing-function: ease;
+}
+
+:focus-visible {
+  outline: 2px solid hsl(var(--accent));
+  outline-offset: 2px;
 }
 
 ::selection {
@@ -234,6 +261,25 @@ html {
 }
 html.dark {
   color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html,
+  body,
+  header,
+  main,
+  footer,
+  section,
+  article,
+  aside,
+  form,
+  [role="dialog"],
+  button,
+  a,
+  input,
+  select {
+    transition-duration: 0.01ms;
+  }
 }
 
 ::-webkit-scrollbar {
