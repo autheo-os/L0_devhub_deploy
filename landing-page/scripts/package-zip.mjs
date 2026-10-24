@@ -22,13 +22,19 @@ const command =
           "-NonInteractive",
           "-Command",
           "Add-Type -AssemblyName System.IO.Compression.FileSystem; " +
-            "[System.IO.Compression.ZipFile]::CreateFromDirectory(" +
-            "$env:AUTHEO_DIST, $env:AUTHEO_ARCHIVE)",
+            "$zip = [System.IO.Compression.ZipFile]::Open(" +
+            "$env:AUTHEO_ARCHIVE, [System.IO.Compression.ZipArchiveMode]::Create); " +
+            "try { Get-ChildItem -LiteralPath $env:AUTHEO_DIST -File -Recurse | ForEach-Object { " +
+            "$entry = [System.IO.Path]::GetRelativePath($env:AUTHEO_DIST, $_.FullName).Replace('\\', '/'); " +
+            "[System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(" +
+            "$zip, $_.FullName, $entry, [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null " +
+            "} } finally { $zip.Dispose() }",
         ],
       }
     : {
         executable: "zip",
-        args: ["-q", "-r", archivePath, "."],
+        // shadw.cloud accepts files only; -D omits explicit directory entries.
+        args: ["-q", "-r", "-D", archivePath, "."],
       };
 
 const result = spawnSync(command.executable, command.args, {
