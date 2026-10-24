@@ -54,6 +54,7 @@ img { display: block; max-width: 100%; }
   z-index: 100;
   top: 16px;
   left: 50%;
+  transform: translateX(-50%);
   width: min(1180px, calc(100% - 32px));
   min-height: 64px;
   display: flex;
@@ -196,20 +197,20 @@ img { display: block; max-width: 100%; }
 .beginner-copy li span { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 50%; background: var(--green-pale); color: var(--green); font-family: "DM Mono", monospace; font-size: 9px; }
 .fine-print { max-width: 620px; margin: 0 0 25px; color: var(--ink-soft); font-size: 11px; line-height: 1.6; }
 
-.marketplace { width: min(1240px, calc(100% - 40px)); }
-.marketplace-heading { max-width: 800px; }
+.marketplace { width: min(1160px, calc(100% - 40px)); }
+.marketplace-heading { max-width: 760px; margin-bottom: 42px; }
 .marketplace-heading .eyebrow { margin-top: 20px; }
-.marketplace-stage { display: grid; grid-template-columns: 0.7fr 1.3fr; align-items: center; gap: 26px; }
-.marketplace-copy { z-index: 2; margin-right: -100px; }
-.future-card { padding: 35px; border: 1px solid var(--line); border-radius: 24px; background: color-mix(in srgb, var(--surface) 92%, transparent); box-shadow: var(--shadow); backdrop-filter: blur(18px); }
+.marketplace-stage { display: grid; grid-template-columns: minmax(340px, 0.78fr) minmax(0, 1.22fr); align-items: stretch; gap: 24px; }
+.marketplace-copy { position: relative; z-index: 2; }
+.future-card { height: 100%; padding: 35px; border: 1px solid var(--line); border-radius: 24px; background: color-mix(in srgb, var(--surface) 92%, transparent); box-shadow: var(--shadow); backdrop-filter: blur(18px); }
 .future-card-label { color: var(--green); font-family: "DM Mono", monospace; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; }
 .future-card h3 { margin: 13px 0 24px; font-size: 28px; line-height: 1.15; letter-spacing: -0.035em; }
 .future-list { display: grid; gap: 12px; }
 .future-item { display: flex; align-items: center; gap: 12px; color: var(--ink-soft); font-size: 13px; }
 .future-icon { display: grid; width: 38px; height: 38px; flex: 0 0 auto; place-items: center; border-radius: 11px; color: var(--green); background: var(--green-pale); }
 .availability-note { margin: 24px 0; padding-top: 18px; border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 10px; line-height: 1.6; }
-.marketplace-art { position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 28px; background: #f4f8ee; box-shadow: var(--shadow); }
-.marketplace-art img { width: 100%; min-height: 540px; object-fit: cover; object-position: center; opacity: 0.92; }
+.marketplace-art { position: relative; aspect-ratio: 4 / 3; overflow: hidden; border: 1px solid var(--line); border-radius: 24px; background: #f4f8ee; box-shadow: var(--shadow); }
+.marketplace-art img { width: 100%; height: 100%; object-fit: contain; opacity: 0.92; }
 :root[data-theme="night"] .marketplace-art img, :root[data-theme="night"] .marketplace-details img { filter: sepia(0.35) hue-rotate(85deg) brightness(0.72) contrast(1.15); }
 .art-stamp { position: absolute; z-index: 2; top: 18px; right: 18px; padding: 8px 11px; border-radius: 999px; color: white; background: #087a57; font-family: "DM Mono", monospace; font-size: 9px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; }
 .marketplace-details { margin-top: 26px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); }
@@ -241,8 +242,7 @@ footer a:last-child { color: var(--green); font-weight: 800; }
   .process { gap: 45px; }
   .beginner { gap: 35px; padding-inline: 30px; }
   .marketplace-stage { grid-template-columns: 1fr; }
-  .marketplace-copy { margin: 0; }
-  .marketplace-art { order: -1; }
+  .future-card { height: auto; }
 }
 
 @media (max-width: 720px) {
@@ -268,7 +268,7 @@ footer a:last-child { color: var(--green); font-weight: 800; }
   .beginner-art { min-height: 300px; }
   .orbit-one { width: 190px; height: 190px; }
   .orbit-two { width: 280px; height: 280px; }
-  .marketplace-art img { min-height: 380px; }
+  .marketplace-art { aspect-ratio: 4 / 3; }
   .details-grid { grid-template-columns: 1fr; }
   .closing { width: calc(100% - 32px); padding: 40px 26px; align-items: flex-start; flex-direction: column; }
   footer { padding-block: 55px; align-items: flex-start; flex-direction: column; }
