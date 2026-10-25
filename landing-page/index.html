@@ -6,8 +6,17 @@
     <meta name="description" content="Build, deploy, and manage supported projects with Autheo DevHub." />
     <meta name="theme-color" content="#f4f5ed" />
     <title>Autheo DevHub | Your Ideas. Your Cloud.</title>
+    <script>
+      (() => {
+        const saved = localStorage.getItem("autheo-landing-theme");
+        document.documentElement.dataset.theme =
+          saved === "day" || saved === "night"
+            ? saved
+            : matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day";
+      })();
+    </script>
   </head>
-  <body>
+  <body data-page="home">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

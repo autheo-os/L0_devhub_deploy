@@ -1,7 +1,5 @@
 import { ArrowUpRight, Gamepad2, HardDrive, Store, UsersRound } from "lucide-react";
-import { siteConfig } from "../config";
 import marketplaceOverview from "../assets/marketplace-overview.png";
-import marketplaceFlow from "../assets/marketplace-flow.png";
 
 const previewItems = [
   { icon: HardDrive, text: "Find computing resources for your projects." },
@@ -11,14 +9,12 @@ const previewItems = [
 ];
 
 export function MarketplacePreview() {
-  const { marketplace } = siteConfig;
-
   return (
     <section id="marketplace" className="marketplace section" aria-labelledby="marketplace-title">
       <div className="section-heading marketplace-heading">
         <span className="status status-coming">Coming soon</span>
-        <p className="eyebrow">{marketplace.eyebrow}</p>
-        <h2 id="marketplace-title">{marketplace.headline}</h2>
+        <p className="eyebrow">Neighborhood Marketplace</p>
+        <h2 id="marketplace-title">Coming Soon: The Neighborhood Marketplace</h2>
         <p>
           A community-powered marketplace connecting people who need computing resources with
           providers who have capacity to share.
@@ -46,13 +42,13 @@ export function MarketplacePreview() {
               Preview only. Purchasing, provider registration, staking, earnings, and payments
               are not available.
             </p>
-            <a className="button button-dark" href="#marketplace-vision">
+            <a className="button button-dark" href="/marketplace/">
               Explore the Marketplace Vision <ArrowUpRight aria-hidden="true" size={17} />
             </a>
           </div>
         </div>
 
-        <div className="marketplace-art" id="marketplace-vision">
+        <div className="marketplace-art">
           <span className="art-stamp">Coming soon</span>
           <img
             src={marketplaceOverview}
@@ -61,23 +57,6 @@ export function MarketplacePreview() {
         </div>
       </div>
 
-      <details className="marketplace-details">
-        <summary>See how the future marketplace is envisioned to work</summary>
-        <div className="details-grid">
-          <img
-            src={marketplaceFlow}
-            alt="Concept diagram of the future provider application, verification, capacity selection, ordering, and DevHub execution flow."
-          />
-          <div>
-            <span className="status status-coming">Concept only</span>
-            <h3>Designed for verification before participation</h3>
-            <p>
-              The planned experience includes provider eligibility, security checks, payments,
-              and end-to-end operational testing. These systems are not presented as live today.
-            </p>
-          </div>
-        </div>
-      </details>
     </section>
   );
 }
