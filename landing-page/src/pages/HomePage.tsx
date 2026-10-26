@@ -21,7 +21,7 @@ const useCases = [
   {
     number: "01", icon: Code2, title: "Build your first website",
     copy: "Have an idea? Turn it into a website and get it online.",
-    detail: "Follow the verified Git path or evaluate a template listed in the current dashboard.",
+    detail: "Connect a Git repository or start with a template available in DevHub.",
     rail: "build-deploy" as PageId,
   },
   {
@@ -100,7 +100,7 @@ export function HomePage() {
         <div className="section-heading">
           <p className="eyebrow">Choose your starting point</p>
           <h2 id="start-choice-title">Two clear ways into DevHub.</h2>
-          <p>Start with the path that matches what you have today. Both guides use the current DevHub navigation and clearly mark steps that still need live account confirmation.</p>
+          <p>Start with the path that matches what you have today, whether you are creating your first website or bringing an existing project.</p>
         </div>
         <div className="start-choice-grid">
           <a className="start-choice-card" href="/getting-started/">

@@ -63,7 +63,7 @@ export function AiAssistedPage() {
         { title: "Generate a starting point", copy: "Use the assistant to draft project files, explain unfamiliar code, or suggest changes." },
         { title: "Review every file", copy: "Treat generated output as untrusted until you understand the dependencies, behavior, and security implications." },
         { title: "Prepare for deployment", copy: "Confirm the entry point, include generated assets, and identify every required environment value." },
-        { title: "Deploy through DevHub", copy: "Put the reviewed project in Git, then use the verified Git URL or connected GitHub import path." },
+        { title: "Deploy through DevHub", copy: "Put the reviewed project in Git, then use a Git URL or connected GitHub import." },
         { title: "Inspect and revise", copy: "Read build progress and logs, make a deliberate fix, and deploy the reviewed change." },
       ]} />
       <WorkflowSteps title="Idea to inspected deployment" steps={[
@@ -125,11 +125,11 @@ export function AiAssistedPage() {
       />
       <DetailCards eyebrow="Who this is for" title="A workflow for assisted building" items={[
         { title: "New builders", copy: "Use an external assistant to learn and create a small project while retaining ownership of the result." },
-        { title: "Developers prototyping", copy: "Move quickly from an assisted draft to a locally verified deployment candidate." },
+        { title: "Developers prototyping", copy: "Move quickly from an assisted draft to a deployment-ready project." },
         { title: "Teams reviewing generated code", copy: "Make review, configuration, and deployment inspection explicit parts of the process." },
       ]} />
       <RelatedRails rails={relatedRails(["getting-started", "build-deploy", "manage-monitor"])} />
-      <ClosingCta title="Deploy the code you have reviewed." copy="When the project runs locally and its requirements are clear, follow the verified Git workflow in the beginner guide." href="/getting-started/#six-steps" label="Follow the beginner guide" />
+      <ClosingCta title="Deploy the code you have reviewed." copy="When the project runs locally and its requirements are clear, follow the Git workflow in the beginner guide." href="/getting-started/#six-steps" label="Follow the beginner guide" />
     </>
   );
 }

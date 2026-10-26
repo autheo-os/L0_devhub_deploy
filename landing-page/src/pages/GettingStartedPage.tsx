@@ -112,7 +112,7 @@ export function GettingStartedPage() {
         status={rail.status}
         eyebrow={rail.eyebrow}
         title="Your First Website on DevHub."
-        intro="Create a tiny website, prove that it builds on your computer, put it in a Git repository, and follow the current DevHub interface from sign-in to a live deployment."
+        intro="Create a small website, add it to DevHub, configure the project, and follow your deployment from build to launch."
         secondaryHref="#six-steps"
         secondaryLabel="Start the six steps"
       >
@@ -124,28 +124,17 @@ export function GettingStartedPage() {
         </div>
       </RailHero>
 
-      <section className="detail-section verification-note" aria-labelledby="verification-title">
-        <div className="detail-heading">
-          <p className="eyebrow">What was verified</p>
-          <h2 id="verification-title">Instructions tied to the current interface.</h2>
-        </div>
-        <div className="verification-grid">
-          <article><span className="status status-available">Source verified</span><p>Routes and labels below match the DevHub dashboard implementation: Add New..., Project, Import Git Repository, Clone Template, Build Logs, Visit, Continue to Project, Deployments, Logs, Settings, and Redeploy.</p></article>
-          <article><span className="status status-development">Manual confirmation needed</span><p>The public sign-in, sign-up, docs, and protected New Project destinations respond. This review did not create an account or complete a live build, so authentication providers, GitHub authorization, worker capacity, and a successful production deployment still need confirmation in your account.</p></article>
-        </div>
-      </section>
-
       <section id="six-steps" className="detail-section" aria-labelledby="steps-title">
         <div className="detail-heading">
           <p className="eyebrow">Click-by-click guide</p>
           <h2 id="steps-title">Six steps to your first website.</h2>
-          <p>Open each step when you need it. The Git repository path is the primary path because both the dashboard and official DevHub documentation describe it.</p>
+          <p>Open each step when you need it and follow the options shown in your DevHub account.</p>
         </div>
         <div className="guide-steps">
           <GuideStep
             number="01"
-            title="Create an account or sign in"
-            explanation="DevHub uses a dedicated sign-up and sign-in flow before showing the project dashboard."
+            title="Sign Up or Log In"
+            explanation="Get started with your DevHub account."
             navigation={<p>Choose <strong>Open DevHub</strong>. Select <strong>Sign up</strong> for a new account or <strong>Sign in</strong> if you already have one. Follow the identity options shown by DevHub. After authentication, the home page becomes the <strong>Autheo Development Hub</strong> dashboard.</p>}
             before="An email address or another identity method offered on the live sign-in screen."
             success="You see the dashboard with Search Projects and the Add New... control, not the public marketing page."
@@ -156,41 +145,41 @@ export function GettingStartedPage() {
           />
           <GuideStep
             number="02"
-            title="Create a simple website"
-            explanation="Use the example below, write your own, or ask an external AI coding assistant for help."
-            navigation={<p>This work happens on your computer, not inside DevHub. DevHub does not include an AI coding assistant. If you want help generating files, use the copyable prompt in the <a href="/ai-assisted/">AI-assisted guide</a>.</p>}
-            before="Node.js 20 or newer, npm, a code editor, and a small idea."
-            success="The page opens locally and you understand which files control its words and styles."
-            problems={["Generated code may include packages or behavior you did not ask for.", "An AI assistant may say a project works without actually running its build."]}
-            href="/ai-assisted/"
-            linkLabel="Build with AI Assistance"
-          />
-          <GuideStep
-            number="03"
-            title="Prepare the files for deployment"
-            explanation="Install dependencies and run the production build before DevHub sees the project."
-            navigation={<p>In a terminal inside the project folder, run <code>npm install</code>, then <code>npm run build</code>. For the example below, success creates a <code>dist/</code> directory. Commit <code>package.json</code>, <code>package-lock.json</code>, <code>index.html</code>, and <code>src/</code> to Git. Do not commit <code>node_modules</code>, <code>dist</code>, or secrets.</p>}
-            before="A complete project folder and a terminal open in that folder."
-            success="npm run build exits successfully and the generated site works with npm run preview."
-            problems={["A missing package usually means npm install did not finish or package.json is incomplete.", "A local development server working does not prove the production build works."]}
-            href="#example"
-            linkLabel="Use the reproducible example"
-          />
-          <GuideStep
-            number="04"
-            title="Create a DevHub project from Git"
-            explanation="Put the prepared project in a GitHub repository, then give DevHub that repository URL."
-            navigation={<p>From the dashboard choose <strong>Add New...</strong> then <strong>Project</strong>. On <strong>Let&apos;s build something new</strong>, paste the public Git repository URL into <strong>Git repository URL or container image</strong> and select <strong>Deploy</strong>. You can instead connect GitHub and use <strong>Import Git Repository</strong>. The page also contains <strong>Clone Template</strong>; template availability does not prove every upstream example currently builds.</p>}
-            before="A Git repository containing the exact revision that passed your local build. Private repositories require a working GitHub connection."
-            success="DevHub accepts the source and opens Preparing Git Repository, followed by the live build page."
-            problems={["A private repository cannot be cloned until GitHub authorization is valid.", "Worker or isolated-builder availability can prevent a source build even when the repository is correct."]}
+            title="Create Your Project"
+            explanation="Start a new project or choose a template."
+            navigation={<p>From the dashboard, choose <strong>Add New...</strong> then <strong>Project</strong>. On <strong>Let&apos;s build something new</strong>, start with your own project or choose <strong>Clone Template</strong> when a suitable template is available.</p>}
+            before="A project idea and a name you will recognize in the dashboard."
+            success="You are in the New Project flow and ready to choose the website source."
+            problems={["Some templates may need changes before they work for your needs.", "If you are still creating your website files, use the beginner example below or the AI-assisted guide."]}
             href={siteConfig.newProjectUrl}
             linkLabel="Open New Project"
           />
           <GuideStep
+            number="03"
+            title="Add Your Website"
+            explanation="Connect GitHub or select another available deployment method."
+            navigation={<p>Use <strong>Import Git Repository</strong> to connect GitHub, paste a repository URL into <strong>Git repository URL or container image</strong>, or choose another source option displayed in the New Project flow. Private repositories require an authorized GitHub connection.</p>}
+            before="Your website in a Git repository, a supported container image, or files prepared for an available source option."
+            success="DevHub accepts the selected source and shows it in the project setup flow."
+            problems={["Make sure DevHub can access a private repository through your connected GitHub account.", "Use only deployment methods currently displayed in your account."]}
+            href="/build-deploy/"
+            linkLabel="Explore deployment methods"
+          />
+          <GuideStep
+            number="04"
+            title="Configure Your Project"
+            explanation="Review the settings needed to run your website."
+            navigation={<p>Choose the project name and team. Under <strong>Project Settings</strong>, review <strong>Build &amp; Development</strong> settings such as Framework Preset, Build Command, Output Directory, Install Command, and Root Directory. Add required values under <strong>Environment Variables</strong> without putting secrets in source.</p>}
+            before="The build command, output directory, and environment values your website requires."
+            success="The project settings match the commands and files that work on your computer."
+            problems={["An incorrect output directory can leave a successful build with no website to serve.", "Environment Variable changes require a new deployment before they affect the website."]}
+            href="#example"
+            linkLabel="Use the beginner example"
+          />
+          <GuideStep
             number="05"
-            title="Deploy and open the website"
-            explanation="Watch the build instead of assuming that clicking Deploy means the site is live."
+            title="Deploy Your Website"
+            explanation="Follow the deployment progress and open your website."
             navigation={<p>The build page shows <strong>Build Logs</strong> and a status such as Building, Deployment ready, or Deployment failed. Wait for <strong>Deployment ready</strong>, then choose <strong>Visit</strong> to open the deployment URL or <strong>Continue to Project</strong> to inspect the project.</p>}
             before="A project accepted by the New Project flow and available compatible infrastructure."
             success="The status says Deployment ready and the Visit link opens the page you tested locally."
@@ -200,8 +189,8 @@ export function GettingStartedPage() {
           />
           <GuideStep
             number="06"
-            title="Update, redeploy, and inspect logs"
-            explanation="Make one visible edit, verify it locally, and deploy the new revision."
+            title="Manage and Update"
+            explanation="View logs, make changes, and redeploy."
             navigation={<p>For a connected Git project, push the commit. Automatic deploys depend on a successfully installed webhook or workflow, so check <strong>Project Settings</strong> then <strong>Git</strong> if nothing starts. To deploy manually, open the project&apos;s <strong>Deployments</strong> tab, open a deployment or its action menu, and choose <strong>Redeploy</strong>. Build output appears under <strong>Build Logs</strong>; request and runtime activity is available from the project <strong>Logs</strong> tab.</p>}
             before="A committed change that passes npm run build, plus access to the project."
             success="A new deployment record reaches Ready and its URL shows the updated text."
@@ -216,7 +205,7 @@ export function GettingStartedPage() {
         <div className="detail-heading">
           <p className="eyebrow">Working example</p>
           <h2 id="example-title">A small Vite website you can reproduce.</h2>
-          <p>DevHub&apos;s New Project interface lists Vite + React and HTML starters, its build settings include Vite, and the backend serves the generated output directory. This example uses plain JavaScript with Vite to keep the files understandable.</p>
+          <p>This example uses plain JavaScript with Vite to keep the files understandable and produces a <code>dist/</code> directory for deployment.</p>
         </div>
         <div className="example-structure">
           <div>
@@ -253,14 +242,14 @@ export function GettingStartedPage() {
         <div className="detail-heading">
           <p className="eyebrow">Interface map</p>
           <h2 id="interface-title">Where the current controls live.</h2>
-          <p>These are text illustrations based on the dashboard source, not screenshots of a completed live account.</p>
+          <p>Use these labels to find the main project, deployment, and settings controls in DevHub.</p>
         </div>
         <div className="interface-map">
           <article><span>Dashboard</span><strong>Add New... - Project</strong><p>Starts at <code>/new</code>.</p></article>
           <article><span>New Project</span><strong>Git URL, Import Git Repository, or Clone Template</strong><p>Choose source, project name, team, and optional environment variables.</p></article>
           <article><span>Project - Settings</span><strong>Build &amp; Development</strong><p>Framework Preset, Build Command, Output Directory, Install Command, and Root Directory.</p></article>
           <article><span>Project - Settings</span><strong>Environment Variables</strong><p>Add a key, value, target environment, build/runtime scope, and Sensitive setting.</p></article>
-          <article><span>Build page</span><strong>Build Logs - Visit - Continue to Project</strong><p>Use the result, not the button click, as proof of deployment.</p></article>
+          <article><span>Build page</span><strong>Build Logs - Visit - Continue to Project</strong><p>Follow progress, open the deployed website, or return to the project.</p></article>
           <article><span>Project</span><strong>Deployments - Logs - Settings</strong><p>Inspect history, request activity, configuration, and the Redeploy action.</p></article>
         </div>
       </section>

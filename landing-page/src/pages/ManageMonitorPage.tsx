@@ -41,12 +41,12 @@ export function ManageMonitorPage() {
         { title: "Manage the next change", copy: "Adjust project settings or source, then create another deployment and review its result." },
       ]} />
       <TwoColumnInfo
-        eyebrow="Capabilities and boundaries"
-        title="Inspection, not an APM promise"
-        firstTitle="What DevHub surfaces"
+        eyebrow="Project visibility"
+        title="See the information available in DevHub"
+        firstTitle="Included project views"
         first={<ul><li>Project and deployment records</li><li>Build and deployment activity</li><li>Available logs and settings</li><li>Workload-oriented views</li></ul>}
-        secondTitle="What this page does not claim"
-        second={<p>DevHub is not presented here as a full application-performance monitoring, distributed tracing, alerting, or guaranteed uptime-monitoring platform. The rail is for reviewing and managing the information currently surfaced.</p>}
+        secondTitle="Monitoring availability"
+        second={<p>Available monitoring focuses on project, deployment, build, log, settings, and workload views. Full application-performance monitoring, distributed tracing, alerting, and guaranteed uptime monitoring are not currently included.</p>}
       />
       <DetailCards eyebrow="Who this is for" title="Useful throughout a project" items={[
         { title: "Builders troubleshooting a deploy", copy: "Trace a failed or incomplete result through build state, deployment status, and logs." },

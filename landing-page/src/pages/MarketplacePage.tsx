@@ -74,7 +74,7 @@ export function MarketplacePage() {
 
       <TwoColumnInfo
         eyebrow="Status and limitations"
-        title="Future language is intentional"
+        title="What to expect from the concept"
         firstTitle="Concept themes"
         first={<ul><li><HardDrive aria-hidden="true" size={15} /> Compute-resource discovery</li><li><Gamepad2 aria-hidden="true" size={15} /> Supported game-server hosting</li><li><UsersRound aria-hidden="true" size={15} /> Provider participation</li><li><ShieldCheck aria-hidden="true" size={15} /> Verification before access</li></ul>}
         secondTitle="Not currently available"

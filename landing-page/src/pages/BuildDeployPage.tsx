@@ -43,12 +43,12 @@ export function BuildDeployPage() {
         ]} />
       </div>
       <TwoColumnInfo
-        eyebrow="Capabilities and boundaries"
-        title="Compatibility matters"
-        firstTitle="Verified in the implementation"
+        eyebrow="Choose the right deployment path"
+        title="Start with a supported project"
+        firstTitle="Available project sources"
         first={<ul><li>Git URL and connected GitHub import</li><li>Listed source templates and container-image input</li><li>Build settings and environment variables</li><li>Build status, deployment details, URLs, and logs</li></ul>}
-        secondTitle="Requires live confirmation"
-        second={<p>The dashboard also implements a ZIP upload route, but this review did not complete an authenticated live upload or deployment, so the beginner path does not present ZIP as proven operational. Template compatibility, private Git access, builders, runtime capacity, domains, and push-to-deploy also depend on the environment.</p>}
+        secondTitle="Availability considerations"
+        second={<p>Template compatibility, private Git access, build and runtime capacity, domains, and automatic push-to-deploy can vary by project and environment. Use the options shown in your account and check the build status and logs after deployment.</p>}
       />
       <DetailCards eyebrow="Who this is for" title="Useful starting points" items={[
         { title: "First-time publishers", copy: "Move a small static or web project from local development to a hosted result." },

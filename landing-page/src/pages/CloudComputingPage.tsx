@@ -41,12 +41,12 @@ export function CloudComputingPage() {
         { title: "Run and inspect", copy: "The deployment starts, while DevHub surfaces its result and available logs for review." },
       ]} />
       <TwoColumnInfo
-        eyebrow="Capabilities and boundaries"
+        eyebrow="Resource availability"
         title="Availability is specific, not unlimited"
         firstTitle="What users can explore"
         first={<ul><li>Regions represented by the platform</li><li>Available resource and workload information</li><li>Supported deployment paths</li><li>Project-to-infrastructure workflow</li></ul>}
         secondTitle="What can vary"
-        second={<p>Capacity, region choice, workload compatibility, and resource support can vary. This page does not promise universal framework support, unlimited capacity, guaranteed geographic availability, or purchasable Marketplace capacity.</p>}
+        second={<p>Capacity, region choice, workload compatibility, and resource support can vary. Universal framework support, unlimited capacity, guaranteed geographic availability, and purchasable Marketplace capacity are not currently available.</p>}
       />
       <DetailCards eyebrow="Who this is for" title="Learn by connecting concepts" items={[
         { title: "Cloud newcomers", copy: "See how source, configuration, builds, resources, and a running deployment relate." },

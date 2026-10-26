@@ -380,10 +380,6 @@ footer a:last-child { color: var(--green); font-weight: 800; }
 .related-card p { color: var(--ink-soft); line-height: 1.65; }
 .related-card > span { display: inline-flex; align-items: center; gap: 7px; color: var(--green); font-size: 12px; font-weight: 800; }
 
-.verification-note { padding-top: 40px; }
-.verification-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
-.verification-grid article { padding: 28px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); }
-.verification-grid p { margin: 18px 0 0; color: var(--ink-soft); line-height: 1.75; }
 
 .guide-steps { border-top: 1px solid var(--line); }
 .guide-step { border-bottom: 1px solid var(--line); }
@@ -498,7 +494,7 @@ footer a:last-child { color: var(--green); font-weight: 800; }
   .detail-card-grid article { min-height: 210px; }
   .workflow-grid li { min-height: auto; }
   .workflow-grid h3 { margin-top: 28px; }
-  .start-choice-grid, .verification-grid, .guide-step-body, .example-structure, .example-files, .prompt-grid, .interface-map, .troubleshooting-grid { grid-template-columns: 1fr; }
+  .start-choice-grid, .guide-step-body, .example-structure, .example-files, .prompt-grid, .interface-map, .troubleshooting-grid { grid-template-columns: 1fr; }
   .guide-step summary { grid-template-columns: 42px 1fr; gap: 12px; }
   .guide-step-body { padding-left: 0; }
   .guide-link { grid-column: 1; }
