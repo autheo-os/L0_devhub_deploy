@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowRight, Menu, X } from "lucide-react";
 import { siteConfig } from "../config";
 import { railById, rails, type PageId } from "../rails";
+import { BrandLogo } from "./BrandLogo";
 import { ThemeToggle, type Theme } from "./ThemeToggle";
 
 interface SiteHeaderProps {
@@ -26,9 +27,7 @@ export function SiteHeader({ page, theme, onThemeToggle }: SiteHeaderProps) {
   return (
     <header className="site-header">
       <a className="brand" href="/" aria-label="Autheo DevHub home">
-        <span className="brand-mark">A</span>
-        <span>autheo</span>
-        <small>DevHub</small>
+        <BrandLogo />
       </a>
 
       <nav id="site-navigation" className={`site-nav ${menuOpen ? "is-open" : ""}`} aria-label="Primary navigation">
