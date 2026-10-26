@@ -10,8 +10,9 @@ depend on client-side history routing.
 - `/build-deploy/` - Build & Deploy
 - `/manage-monitor/` - Manage & Monitor
 - `/cloud-computing/` - Cloud Computing
-- `/ai-assisted/` - AI-Assisted Development Workflow
-- `/getting-started/` - beginner-focused guide
+- `/ai-assisted/` - copyable prompts and an external AI-assistant workflow
+- `/getting-started/` - practical six-step first-website guide, reproducible
+  Vite example, interface map, and troubleshooting
 - `/marketplace/` - Neighborhood Marketplace concept
 
 Each URL has a real HTML entry point. `vite.config.ts` lists each entry
@@ -101,11 +102,57 @@ must support ordinary static directory indexes so `/build-deploy/` resolves to
 `/build-deploy/index.html`. Launch DevHub links intentionally navigate to the
 URL configured in `src/config.ts`.
 
+## Onboarding flow
+
+The home page keeps DevHub first and offers two prominent routes:
+
+1. **I'm new - start here** opens `/getting-started/`.
+2. **I already have a project** opens `/build-deploy/`.
+
+The beginner guide follows the current dashboard implementation:
+
+1. Open the verified `/sign-up` or `/sign-in` route.
+2. Create a small website locally, optionally with an external AI assistant.
+3. Run the production build locally and commit complete source to Git.
+4. On the authenticated dashboard, choose `Add New...` then `Project`, paste a
+   Git URL or import a connected GitHub repository, and start the build.
+5. Use `Build Logs`; wait for `Deployment ready`; then use `Visit` or
+   `Continue to Project`.
+6. Push a reviewed update or use `Deployments` and `Redeploy`, then inspect
+   build output and the project `Logs` view.
+
+The working example uses plain JavaScript with Vite. Its expected production
+output is `dist/`, matching the Vite framework option and output-directory
+settings implemented by DevHub. The AI page states that ChatGPT, Cursor,
+Claude, or another external tool may generate files, but DevHub does not
+provide that assistant.
+
+## Link destinations
+
+All external destinations are centralized in `src/config.ts`:
+
+- `https://dev.autheo.com/`
+- `https://dev.autheo.com/sign-in`
+- `https://dev.autheo.com/sign-up`
+- `https://dev.autheo.com/new`
+- `https://dev.autheo.com/docs`
+- `https://dev.autheo.com/docs/getting-started`
+- `https://dev.autheo.com/docs/errors/deployment-not-found`
+
+The public home, sign-in, sign-up, documentation, and getting-started routes
+returned HTTP 200 during this review. The protected New Project URL redirected
+an unauthenticated request to sign-in as expected.
+
 ## Product status
 
-- DevHub project creation, supported Git and container deployment, deployment
-  management, logs, and workload views are presented as available based on the
-  implemented DevHub repository surfaces.
+- The verified beginner path uses Git because both the New Project source and
+  official DevHub documentation implement and describe it.
+- The dashboard source implements project creation, Git URL and connected
+  GitHub import, templates, container-image input, build settings, environment
+  variables, build logs, deployment URLs, project logs, and redeploy controls.
+- ZIP upload is implemented at `/new/upload`, but this review did not complete
+  an authenticated live upload. The beginner guide therefore does not present
+  ZIP as a proven operational path.
 - AI-assisted development is described as a workflow with external AI tools;
   DevHub is not described as providing an AI assistant.
 - Expanding ecosystem resources are labeled in development.
@@ -115,3 +162,31 @@ URL configured in `src/config.ts`.
 
 Marketplace status and the DevHub destination URL are configured in
 `src/config.ts`; shared rail metadata and navigation live in `src/rails.ts`.
+
+## Manual live-dashboard confirmation
+
+The source, public routes, and unauthenticated redirect were verified. A person
+with a test account should still run this exact live check before treating the
+complete journey as operational:
+
+1. Complete sign-up, sign out, and sign back in.
+2. Confirm the authenticated home page shows `Autheo Development Hub`,
+   `Search Projects`, and `Add New...`.
+3. Create a public Git repository from the example on `/getting-started/`.
+4. Choose `Add New...` then `Project`; paste the repository URL; deploy.
+5. Confirm the build page streams `Build Logs` and reaches
+   `Deployment ready`.
+6. Use `Visit` and confirm the generated deployment URL serves the example.
+7. Use `Continue to Project`; confirm `Deployments`, `Logs`, and `Settings`.
+8. Change the heading, run the local build, push the commit, and confirm
+   whether Git automation starts a deployment. If it does not, inspect
+   `Settings` then `Git` for webhook or workflow status.
+9. Open a deployment and use `Redeploy`; confirm a new deployment reaches
+   Ready and shows the change.
+10. Confirm the theme switch, desktop and mobile navigation, every external
+    link, and both AI-prompt copy buttons.
+
+Environment-dependent items that this repository review cannot prove include
+the configured identity providers, private GitHub authorization, webhook or
+workflow installation, compatible builder and runtime capacity, DNS, custom
+domains, certificates, and a successful production deployment.

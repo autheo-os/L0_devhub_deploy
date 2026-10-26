@@ -14,8 +14,9 @@ interface PageShellProps {
 export function PageShell({ page, theme, onThemeToggle, children }: PageShellProps) {
   return (
     <div className="site-shell" id="top">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <SiteHeader page={page} theme={theme} onThemeToggle={onThemeToggle} />
-      <main>{children}</main>
+      <main id="main-content" tabIndex={-1}>{children}</main>
       <SiteFooter />
     </div>
   );

@@ -14,7 +14,7 @@ export function BuildDeployPage() {
         status={rail.status}
         eyebrow={rail.eyebrow}
         title="Build and deploy with a path you can follow."
-        intro="Bring a compatible website, application, service, or container workload. DevHub helps configure the project, build supported source or pull a supported image, and create a deployment you can inspect."
+        intro="Bring a compatible website, application, service, or container workload. The current New Project interface accepts a Git URL, connected GitHub repository, listed template, or container image and then opens build progress you can inspect."
         secondaryHref="#workflow"
         secondaryLabel="See the workflow"
       >
@@ -26,7 +26,7 @@ export function BuildDeployPage() {
         </div>
       </RailHero>
       <DetailCards eyebrow="What this rail helps you do" title="Move a prepared project into a deployment" items={[
-        { title: "Deploy websites", copy: "Bring supported website source and create a hosted deployment through DevHub." },
+        { title: "Deploy websites", copy: "Bring supported website source through Git and create a deployment through DevHub." },
         { title: "Run applications and services", copy: "Deploy compatible web applications and service workloads with an appropriate entry point." },
         { title: "Use Git-based source", copy: "Connect supported Git repository workflows so project source can move into the build process." },
         { title: "Bring a container image", copy: "Use supported container-image workloads when the image and runtime requirements are compatible." },
@@ -35,8 +35,8 @@ export function BuildDeployPage() {
       ]} />
       <div id="workflow">
         <WorkflowSteps title="From project to running workload" steps={[
-          { title: "Bring a project", copy: "Choose an available starter, connect supported Git source, upload prepared project files, or provide a supported container image." },
-          { title: "Configure project basics", copy: "Name the project, select relevant settings, and add the environment values the workload requires." },
+          { title: "Bring a project", copy: "From the dashboard, choose Add New... then Project. Paste a Git URL, import a connected GitHub repository, select a listed template, or provide a container image." },
+          { title: "Configure project basics", copy: "Set the project name and team. Expand Environment Variables when the build or runtime needs values." },
           { title: "Build or pull", copy: "DevHub builds compatible source workloads or pulls the configured supported image." },
           { title: "Create a deployment", copy: "The prepared workload is assigned to available compatible infrastructure and started." },
           { title: "Inspect the result", copy: "Review progress, deployment state, and logs. Correct project-level failures and deploy again." },
@@ -45,10 +45,10 @@ export function BuildDeployPage() {
       <TwoColumnInfo
         eyebrow="Capabilities and boundaries"
         title="Compatibility matters"
-        firstTitle="Available today"
-        first={<ul><li>Project creation and configuration</li><li>Supported Git and upload workflows</li><li>Compatible web, service, and container deployments</li><li>Build status, deployment results, and logs</li></ul>}
-        secondTitle="Plan for variation"
-        second={<p>Not every framework, image, architecture, port layout, or runtime requirement is supported. Confirm the workload entry point, dependencies, required values, and resource needs before deploying.</p>}
+        firstTitle="Verified in the implementation"
+        first={<ul><li>Git URL and connected GitHub import</li><li>Listed source templates and container-image input</li><li>Build settings and environment variables</li><li>Build status, deployment details, URLs, and logs</li></ul>}
+        secondTitle="Requires live confirmation"
+        second={<p>The dashboard also implements a ZIP upload route, but this review did not complete an authenticated live upload or deployment, so the beginner path does not present ZIP as proven operational. Template compatibility, private Git access, builders, runtime capacity, domains, and push-to-deploy also depend on the environment.</p>}
       />
       <DetailCards eyebrow="Who this is for" title="Useful starting points" items={[
         { title: "First-time publishers", copy: "Move a small static or web project from local development to a hosted result." },

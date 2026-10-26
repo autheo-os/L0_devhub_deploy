@@ -5,7 +5,9 @@ import {
   Check,
   Cloud,
   Code2,
+  FolderGit2,
   FolderKanban,
+  GraduationCap,
   Rocket,
 } from "lucide-react";
 import { MarketplacePreview } from "../components/MarketplacePreview";
@@ -19,7 +21,7 @@ const useCases = [
   {
     number: "01", icon: Code2, title: "Build your first website",
     copy: "Have an idea? Turn it into a website and get it online.",
-    detail: "Start from a template, supported Git source, or a project upload.",
+    detail: "Follow the verified Git path or evaluate a template listed in the current dashboard.",
     rail: "build-deploy" as PageId,
   },
   {
@@ -55,7 +57,7 @@ const useCases = [
 ];
 
 const steps = [
-  ["01", "Bring your project", "Connect supported source, upload a project, or provide a supported container image."],
+  ["01", "Bring your project", "Paste a Git URL, import a connected GitHub repository, choose a listed template, or provide a supported container image."],
   ["02", "Configure the basics", "Choose a project name, add required environment variables, and review settings."],
   ["03", "Deploy with DevHub", "DevHub builds supported source or pulls a supported image, then creates a deployment."],
   ["04", "Manage and inspect", "Follow build progress, review logs, manage deployments, and track project activity."],
@@ -75,9 +77,9 @@ export function HomePage() {
           <p className="hero-mantra">Build It. Deploy It. Run It.</p>
           <div className="hero-actions">
             <a className="button button-primary" href={siteConfig.devHubUrl}>
-              Launch DevHub <ArrowRight aria-hidden="true" size={17} />
+              Open DevHub <ArrowRight aria-hidden="true" size={17} />
             </a>
-            <a className="button button-secondary" href="#build">See What You Can Build</a>
+            <a className="button button-secondary" href="/getting-started/">I&apos;m New - Start Here</a>
           </div>
           <div className="availability">
             <span><Check aria-hidden="true" size={14} /> DevHub available now</span>
@@ -91,6 +93,34 @@ export function HomePage() {
             <span className="pulse-dot" />
             <div><strong>The neighborhood is taking shape.</strong><small>DevHub is where ideas begin.</small></div>
           </div>
+        </div>
+      </section>
+
+      <section className="section start-choice" aria-labelledby="start-choice-title">
+        <div className="section-heading">
+          <p className="eyebrow">Choose your starting point</p>
+          <h2 id="start-choice-title">Two clear ways into DevHub.</h2>
+          <p>Start with the path that matches what you have today. Both guides use the current DevHub navigation and clearly mark steps that still need live account confirmation.</p>
+        </div>
+        <div className="start-choice-grid">
+          <a className="start-choice-card" href="/getting-started/">
+            <span className="feature-icon"><GraduationCap aria-hidden="true" size={23} /></span>
+            <span className="status status-available">Beginner guide</span>
+            <h3>I&apos;m new - start here</h3>
+            <p>I have an idea, but I need help creating the files and deploying my first website.</p>
+            <strong>Start Your First Website on DevHub <ArrowRight aria-hidden="true" size={15} /></strong>
+          </a>
+          <a className="start-choice-card" href="/build-deploy/">
+            <span className="feature-icon"><FolderGit2 aria-hidden="true" size={23} /></span>
+            <span className="status status-available">Deployment guide</span>
+            <h3>I already have a project</h3>
+            <p>I have code in a Git repository and want to configure, deploy, and inspect it.</p>
+            <strong>View deployment instructions <ArrowRight aria-hidden="true" size={15} /></strong>
+          </a>
+        </div>
+        <div className="start-choice-actions">
+          <a className="button button-secondary" href="/ai-assisted/">Build with AI Assistance</a>
+          <a className="button button-secondary" href={siteConfig.gettingStartedDocsUrl}>Read DevHub Documentation</a>
         </div>
       </section>
 

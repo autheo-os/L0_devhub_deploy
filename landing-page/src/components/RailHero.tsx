@@ -36,7 +36,7 @@ export function RailHero({
         <div className="hero-actions">
           {launch && (
             <a className="button button-primary" href={siteConfig.devHubUrl}>
-              Launch DevHub <ArrowRight aria-hidden="true" size={17} />
+              Open DevHub <ArrowRight aria-hidden="true" size={17} />
             </a>
           )}
           <a className="button button-secondary" href={secondaryHref}>{secondaryLabel}</a>

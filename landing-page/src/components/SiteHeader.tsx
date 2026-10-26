@@ -62,7 +62,7 @@ export function SiteHeader({ page, theme, onThemeToggle }: SiteHeaderProps) {
       <div className="header-actions">
         <ThemeToggle theme={theme} onToggle={onThemeToggle} />
         <a className="button button-primary header-cta" href={siteConfig.devHubUrl}>
-          Launch DevHub <ArrowRight aria-hidden="true" size={16} />
+          Open DevHub <ArrowRight aria-hidden="true" size={16} />
         </a>
         <button
           className="menu-button"

@@ -14,7 +14,7 @@ export function ClosingCta({
   title,
   copy,
   href = siteConfig.devHubUrl,
-  label = "Launch DevHub",
+  label = "Open DevHub",
 }: ClosingCtaProps) {
   return (
     <section className="closing">
