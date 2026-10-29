@@ -102,11 +102,12 @@ settings belong to prepared configs; MODS_PRESET is a Launcher HTML preset path,
 not fabricated Workshop ID support. Terraria remains vanilla, no tModLoader.
 ## Guided setup (UX)
 
-Games are not generic templates: they are only reachable from the Games menu,
-which lists names/descriptions only. No game settings, env keys, passwords or
-ports appear (and nothing prefills the generic Environment Variables sections of
-/new) until a game is chosen. The game screen then shows a "What you need before
-you start" checklist (platform/memory, ports, required credentials, saved-data
+Games are not generic templates: they are only reachable from the Games menu.
+The menu may show friendly configuration labels and whether host verification is
+required, but never raw env keys, passwords, port values or setup notes. Nothing
+prefills the generic Environment Variables sections of /new until a game is
+chosen. The game screen then shows a "What you need before you start" checklist
+(platform/memory, ports, required credentials, saved-data
 path, plus the setupNotes) and numbered steps built from each field's `group`
 (`GAME_SETUP_STEPS`: 1 Server basics, 2 World & map, 3 Access & passwords,
 4 Advanced options; empty world/access steps are skipped). Fields carry friendly
@@ -328,8 +329,9 @@ It checks all eleven identities, transport/persistence, multiports, typed fields
 profiles, OCI/runtime version validation, missing/short credentials, masked
 summary values, backend policy and accessibility/navigation source guards, plus
 guided-setup metadata (every field has a valid group and label, required keys are
-not under Advanced, review rows never show secrets) and that no game preset/env
-leaks into the generic template grid or Environment Variables areas of /new.
+not under Advanced, review rows never show secrets), friendly discovery metadata,
+and that no raw game preset/env data leaks into the generic template grid or
+Environment Variables areas of /new.
 These source guards are NOT DOM/browser interaction proof.
 
 Also run the repository frontend type/build checks and applicable Rust compilation

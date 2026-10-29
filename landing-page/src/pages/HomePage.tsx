@@ -7,15 +7,18 @@ import {
   Code2,
   FolderGit2,
   FolderKanban,
-  GraduationCap,
+  Gamepad2,
   Rocket,
 } from "lucide-react";
 import { MarketplacePreview } from "../components/MarketplacePreview";
 import { ClosingCta } from "../components/ClosingCta";
+import { GamingShowcase } from "../components/GamingShowcase";
 import { siteConfig } from "../config";
 import { railById, type PageId } from "../rails";
 import heroDay from "../assets/hero-day.png";
 import heroNight from "../assets/hero-night.png";
+
+const gameCatalogUrl = `${siteConfig.newProjectUrl}?category=games`;
 
 const useCases = [
   {
@@ -99,30 +102,33 @@ export function HomePage() {
       <section className="section start-choice" aria-labelledby="start-choice-title">
         <div className="section-heading">
           <p className="eyebrow">Choose your starting point</p>
-          <h2 id="start-choice-title">Two clear ways into DevHub.</h2>
-          <p>Start with the path that matches what you have today, whether you are creating your first website or bringing an existing project.</p>
+          <h2 id="start-choice-title">What do you want to launch?</h2>
+          <p>Choose a path tailored to building software or hosting a multiplayer game. Both use the same DevHub deployment platform.</p>
         </div>
         <div className="start-choice-grid">
-          <a className="start-choice-card" href="/getting-started/">
-            <span className="feature-icon"><GraduationCap aria-hidden="true" size={23} /></span>
-            <span className="status status-available">Beginner guide</span>
-            <h3>I&apos;m new - start here</h3>
-            <p>I have an idea, but I need help creating the files and deploying my first website.</p>
-            <strong>Start Your First Website on DevHub <ArrowRight aria-hidden="true" size={15} /></strong>
-          </a>
           <a className="start-choice-card" href="/build-deploy/">
             <span className="feature-icon"><FolderGit2 aria-hidden="true" size={23} /></span>
-            <span className="status status-available">Deployment guide</span>
-            <h3>I already have a project</h3>
-            <p>I have code in a Git repository and want to configure, deploy, and inspect it.</p>
-            <strong>View deployment instructions <ArrowRight aria-hidden="true" size={15} /></strong>
+            <span className="status status-available">Developers and creators</span>
+            <h3>Build a Website or App</h3>
+            <p>Deploy your own code, import a GitHub project, upload a ZIP, or start from a software template.</p>
+            <strong>Explore app deployment <ArrowRight aria-hidden="true" size={15} /></strong>
+          </a>
+          <a className="start-choice-card start-choice-game" href={gameCatalogUrl}>
+            <span className="feature-icon"><Gamepad2 aria-hidden="true" size={23} /></span>
+            <span className="status status-available">Gamers and communities</span>
+            <h3>Host a Game Server</h3>
+            <p>Choose a supported game, configure the available settings, and deploy without building an application.</p>
+            <strong>Choose your game <ArrowRight aria-hidden="true" size={15} /></strong>
           </a>
         </div>
         <div className="start-choice-actions">
+          <a className="button button-secondary" href="/getting-started/">Start Your First Website</a>
           <a className="button button-secondary" href="/ai-assisted/">Build with AI Assistance</a>
           <a className="button button-secondary" href={siteConfig.gettingStartedDocsUrl}>Read DevHub Documentation</a>
         </div>
       </section>
+
+      <GamingShowcase />
 
       <section className="statement">
         <p>From your first website to your next application,</p>

@@ -245,6 +245,40 @@ img { display: block; max-width: 100%; }
 .start-choice-card p { margin: 0; color: var(--ink-soft); line-height: 1.7; }
 .start-choice-card strong { display: inline-flex; align-items: center; gap: 7px; margin-top: 26px; color: var(--green); font-size: 12px; }
 .start-choice-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.start-choice-game { background: linear-gradient(145deg, var(--surface), color-mix(in srgb, var(--green-pale) 68%, var(--surface))); }
+
+.gaming { padding-top: 76px; }
+.gaming-heading { display: grid; grid-template-columns: 1fr 0.9fr; align-items: end; gap: 64px; margin-bottom: 38px; }
+.gaming-heading h2 { max-width: 720px; margin: 0; font-size: clamp(40px, 5.5vw, 70px); line-height: 1.02; letter-spacing: -0.06em; }
+.gaming-heading p { margin: 0; color: var(--ink-soft); line-height: 1.75; }
+.gaming-heading .gaming-lead { margin-bottom: 12px; color: var(--ink); font-size: 17px; font-weight: 600; }
+.minecraft-feature { overflow: hidden; border: 1px solid var(--line); border-radius: 28px; background: var(--surface); box-shadow: var(--shadow); }
+.minecraft-art { position: relative; aspect-ratio: 16 / 7; overflow: hidden; background: var(--night); }
+.minecraft-art::after { position: absolute; inset: 0; content: ""; background: linear-gradient(180deg, transparent 65%, rgba(3, 17, 12, 0.48)); pointer-events: none; }
+.minecraft-art img { width: 100%; height: 100%; object-fit: cover; object-position: center 54%; }
+.art-label { position: absolute; z-index: 1; right: 18px; bottom: 16px; padding: 7px 10px; border: 1px solid rgba(255,255,255,0.32); border-radius: 999px; color: #f5fff7; background: rgba(3,17,12,0.64); font-family: "DM Mono", monospace; font-size: 8px; letter-spacing: 0.08em; text-transform: uppercase; backdrop-filter: blur(8px); }
+.minecraft-copy { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(330px, 0.9fr); gap: 14px 48px; padding: 34px 38px 38px; }
+.minecraft-copy .status, .minecraft-copy h3, .minecraft-copy .minecraft-description { grid-column: 1; width: fit-content; }
+.minecraft-copy h3 { margin: 2px 0 0; font-size: clamp(28px, 4vw, 46px); line-height: 1.1; letter-spacing: -0.045em; }
+.minecraft-description { margin: 0; color: var(--ink-soft); font-size: 16px; line-height: 1.7; }
+.minecraft-highlights { grid-column: 2; grid-row: 1 / span 4; display: grid; align-content: center; gap: 13px; margin: 0; padding: 0; list-style: none; }
+.minecraft-highlights li { display: flex; align-items: flex-start; gap: 10px; color: var(--ink-soft); font-size: 13px; line-height: 1.55; }
+.minecraft-highlights svg { flex: 0 0 auto; margin-top: 2px; color: var(--green); }
+.gaming-primary-cta { grid-column: 1 / -1; margin-top: 10px; }
+.minecraft-copy > small { grid-column: 1 / -1; color: var(--ink-soft); font-size: 9px; line-height: 1.55; }
+.more-games-heading { display: flex; align-items: end; justify-content: space-between; gap: 28px; margin: 72px 0 28px; }
+.more-games-heading h3 { margin: 0; font-size: clamp(30px, 4vw, 48px); letter-spacing: -0.045em; }
+.more-games-heading p:last-child { margin: 10px 0 0; color: var(--ink-soft); }
+.game-card-grid { display: grid; grid-template-columns: repeat(2, 1fr); border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
+.game-card { min-height: 270px; padding: 26px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 70%, transparent); }
+.game-card-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.game-monogram { display: grid; min-width: 42px; height: 42px; padding: 0 8px; place-items: center; border-radius: 12px; color: white; font-family: "DM Mono", monospace; font-size: 10px; font-weight: 500; }
+.game-card h4 { margin: 22px 0 8px; font-size: 20px; letter-spacing: -0.025em; }
+.game-card p { margin: 0; color: var(--ink-soft); line-height: 1.6; }
+.game-card small { display: block; margin-top: 16px; color: var(--ink-soft); line-height: 1.55; }
+.game-card small strong { color: var(--ink); }
+.game-card a { display: inline-flex; align-items: center; gap: 7px; margin-top: 20px; color: var(--green); font-size: 12px; font-weight: 800; }
+.gaming-availability-note { max-width: 920px; margin: 20px 0 0; color: var(--ink-soft); font-size: 10px; line-height: 1.65; }
 
 .use-case-grid { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
 .use-case-card { min-height: 330px; padding: 28px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 62%, transparent); transition: background 180ms ease, transform 180ms ease; }
@@ -444,6 +478,9 @@ footer a:last-child { color: var(--green); font-weight: 800; }
   .hero { grid-template-columns: 1fr; padding-top: 140px; }
   .hero-copy { max-width: 760px; }
   .hero-art { min-height: 560px; }
+  .gaming-heading { gap: 36px; }
+  .minecraft-copy { grid-template-columns: 1fr; }
+  .minecraft-highlights { grid-column: 1; grid-row: auto; margin-top: 8px; }
   .use-case-grid { grid-template-columns: repeat(2, 1fr); }
   .process { gap: 45px; }
   .beginner { gap: 35px; padding-inline: 30px; }
@@ -461,7 +498,7 @@ footer a:last-child { color: var(--green); font-weight: 800; }
   .header-cta { display: none; }
   .brand { gap: 7px; }
   .brand-wordmark { width: 104px; }
-  .brand small { padding-left: 7px; font-size: 8px; }
+  .brand small { padding-left: 7px; color: var(--ink); font-size: 9px; letter-spacing: 0.1em; }
   .hero { min-height: auto; grid-template-columns: minmax(0, 1fr); padding: 120px 20px 60px; }
   .hero h1 { font-size: clamp(49px, 15vw, 68px); }
   .hero-subtitle { font-size: 15px; }
@@ -474,6 +511,12 @@ footer a:last-child { color: var(--green); font-weight: 800; }
   .statement-tags i { width: 8px; }
   .section { width: min(100% - 32px, 1160px); padding-block: 85px; }
   .split-heading { grid-template-columns: 1fr; gap: 24px; }
+  .gaming-heading { grid-template-columns: 1fr; gap: 24px; }
+  .minecraft-art { aspect-ratio: 4 / 3; }
+  .minecraft-copy { padding: 26px 22px 28px; }
+  .more-games-heading { align-items: flex-start; flex-direction: column; }
+  .more-games-heading .button { width: 100%; }
+  .game-card-grid { grid-template-columns: 1fr; }
   .use-case-grid { grid-template-columns: 1fr; }
   .use-case-card { min-height: 300px; }
   .process { grid-template-columns: 1fr; }

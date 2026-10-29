@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Github, Search, Loader2, GitBranch, FolderGit2, Lock, ExternalLink, ChevronDown, Plus, X, KeyRound, AlertTriangle, RefreshCw, ShieldCheck } from "lucide-react";
 import Link from "next/link";
@@ -15,7 +15,7 @@ import { PreparingDeployment } from "@/components/clone-animation";
 import Image from "next/image";
 import { MarketplaceDeploymentModal } from "@/components/marketplace-deployment-modal";
 import { DeploymentModelHelp } from "@/components/deployment-model-help";
-import { isSensitiveGameEnv, type GameServerPreset, type GamePresetFields } from "@/lib/game-server-presets";
+import { gamePresetById, isSensitiveGameEnv, type GameServerPreset, type GamePresetFields } from "@/lib/game-server-presets";
 
 import { GamesMenu, ConfigureGame } from "@/components/game-hosting";
 
@@ -179,11 +179,32 @@ export default function NewProjectPage() {
   const [ghCta, setGhCta] = useState<{ text: string; approveUrl?: string } | null>(null);
   const [repoQ, setRepoQ] = useState("");
   const [selected, setSelected] = useState<Template | null>(null);
+  const presetRouteHandled = useRef(false);
   const [tplPage, setTplPage] = useState(0);
   // Set once Create succeeds: drives the "Preparing Git Repository" animation
   // shown between Create and the build-logs view.
   const [preparing, setPreparing] = useState<{ template: Template | null; team: string; src: string; dest: string } | null>(null);
   const [marketplaceOpen, setMarketplaceOpen] = useState(false);
+
+  // Public discovery links can open a real preset directly. This runs only
+  // after authentication has returned the visitor to the original /new URL;
+  // Clerk's middleware preserves the full query string in redirect_url.
+  useEffect(() => {
+    if (presetRouteHandled.current) return;
+    presetRouteHandled.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const gameId = params.get("game");
+    if (gameId) {
+      const preset = gamePresetById(gameId);
+      if (preset) {
+        window.setTimeout(() => setSelected(preset), 0);
+        return;
+      }
+    }
+    if (params.get("category") === "games") {
+      window.setTimeout(() => document.getElementById("game-servers")?.scrollIntoView({ block: "start" }), 0);
+    }
+  }, []);
 
   const TPL_PER = 5;
   const nonGameTemplates = TEMPLATES.filter(t => !t.gameId);
@@ -470,6 +491,8 @@ export default function NewProjectPage() {
       </Link>
       <h1 className="mb-6 text-2xl sm:text-3xl font-semibold tracking-tight">Let&apos;s build something new</h1>
 
+      <GamesMenu onSelect={game => { setError(""); setSelected(game); }} disabled={deploying} />
+
       {/* Web3 spotlight — smart contracts are a first-class deployment shape on
           this platform, so surface them ABOVE the source bar (they're also in
           the Clone Template list below, which keeps paging). Each jumps straight
@@ -640,7 +663,6 @@ export default function NewProjectPage() {
       </div>
       {error ? <p className="mb-6 text-center text-sm text-red-600">{error}</p> : null}
 
-      <GamesMenu onSelect={game => { setError(""); setSelected(game); }} disabled={deploying} />
       <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
         {/* Import Git Repository */}
         <div>
