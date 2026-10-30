@@ -24,7 +24,7 @@ export type GameServerPreset = GamePresetFields & {
   env: Record<string, string>; requiredEnv: { key: string; minLength: number }[]; setupNotes: string[];
 };
 const BASE_GAME_PRESETS: GameServerPreset[] = [
-{"name":"Minecraft Server","desc":"Java Edition server (itzg/minecraft-server) with a persistent world, raw TCP.","image":"itzg/minecraft-server:latest","port":25565,"protocol":"tcp","env":{"EULA":"TRUE"},"memory":"3g","tag":"MC","color":"#5b8c3e","volumeMountPath":"/data","requiredEnv":[],"setupNotes":["Accept Mojang's EULA before creating. OCI version selects the image/Java environment; VERSION selects the runtime download."]},
+{"name":"Minecraft Server","desc":"Java Edition server (itzg/minecraft-server) with a persistent world, raw TCP.","image":"itzg/minecraft-server:latest","port":25565,"protocol":"tcp","env":{"EULA":"TRUE","TYPE":"VANILLA","VERSION":"LATEST","LEVEL":"world","MAX_PLAYERS":"20","DIFFICULTY":"normal","MODE":"survival"},"memory":"3g","tag":"MC","color":"#5b8c3e","volumeMountPath":"/data","requiredEnv":[],"setupNotes":["Accept Mojang's EULA before creating. OCI version selects the image/Java environment; VERSION selects the runtime download."]},
 {"name":"Terraria Server","desc":"Vanilla Terraria server with persistent worlds (TCP). Pin an image tag before important upgrades.","image":"passivelemon/terraria-docker:terraria-latest","port":7777,"protocol":"tcp","env":{"AUTOCREATE":"2","WORLDNAME":"World"},"volumeMountPath":"/opt/terraria/config","memory":"2g","tag":"TR","color":"#718c45","requiredEnv":[],"setupNotes":["AUTOCREATE must match existing world size; changes can corrupt world appearance. Vanilla only, not tModLoader. Back up worlds first."]},
 {"name":"Factorio Server","desc":"Stable headless Factorio server with persistent saves (UDP). Pin a version before upgrading.","image":"factoriotools/factorio:stable","port":34197,"protocol":"udp","env":{},"volumeMountPath":"/factorio","memory":"3g","tag":"FA","color":"#b77b39","requiredEnv":[],"setupNotes":["Prepare /factorio/config/server-settings.json for player limits, passwords and mod portal credentials; these are file settings, not env controls. Verify save/mod compatibility."]},
   {
@@ -74,6 +74,19 @@ const GAME_METADATA: Record<string, GamePresetFields> = {
   "Team Fortress 2 Server": {"gameId":"tf2","platform":"linux/amd64","imageTags":["latest","4","nightly"],"runtimeVersionNote":"TF2 (app 232250) is baked in at build time and srcds -autoupdate may update it at runtime; tf2-base 4.x tags track image releases, not TF2 versions.","fields":[{"key":"SERVER_HOSTNAME","group":"basics","label":"Server name","kind":"text","help":"1-63 characters; no quotes, semicolons, backslashes, $ or backticks."},{"key":"SERVER_PASSWORD","group":"access","label":"Join password (optional)","kind":"secret","help":"Leave blank so anyone can join. No spaces, quotes or semicolons."},{"key":"RCON_PASSWORD","group":"access","label":"Remote admin (RCON) password","kind":"secret","help":"Required, 8-64 characters, no spaces. Used inside the container for health checks and clean shutdown; the RCON port is never published."},{"key":"SERVER_TOKEN","group":"access","label":"Steam server token / GSLT (optional)","kind":"secret","help":"Lets the server appear in the Steam server list. 32 hexadecimal characters from steamcommunity.com/dev/managegameservers (App ID 440)."},{"key":"STV_PASSWORD","group":"advanced","label":"SourceTV password (optional)","kind":"secret","help":"SourceTV's port is not published."},{"key":"ENABLE_FAKE_IP","group":"advanced","label":"Steam Datagram Relay","kind":"select","options":["0","1"],"optionLabels":{"0":"Off, players connect directly","1":"On, route through Steam's relay"}}],"profiles":[{"id":"private","label":"Direct-connect UDP 27015","env":{"ENABLE_FAKE_IP":"0"}},{"id":"sdr","label":"Steam Datagram Relay (fake IP)","env":{"ENABLE_FAKE_IP":"1"}}]},
 };
 export const GAME_SERVER_PRESETS: GameServerPreset[] = BASE_GAME_PRESETS.map(p => ({ ...p, ...GAME_METADATA[p.name] }));
+
+export function gamePresetById(gameId: string): GameServerPreset | undefined {
+  return GAME_SERVER_PRESETS.find(game => game.gameId === gameId);
+}
+
+/** Friendly discovery metadata only; never exposes raw env keys or credentials. */
+export function gameCatalogConfiguration(game: GameServerPreset): string {
+  return (game.fields ?? []).slice(0, 3).map(field => field.label).join(", ");
+}
+
+export function gameCatalogAvailability(game: GameServerPreset): string {
+  return game.extraPorts?.length ? "Host check required" : "Guided preset";
+}
 
 /** Errors name keys only; never reflect credential values into UI/logs. */
 export function gamePresetEnvErrors(template: GamePresetFields, env: Record<string, string>): string[] {

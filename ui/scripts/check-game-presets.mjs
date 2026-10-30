@@ -98,7 +98,8 @@ const gameKeys=new Set(GAME_SERVER_PRESETS.flatMap(t=>[...Object.keys(t.env),...
 for(const key of gameKeys)check(!new RegExp('["\'`]'+key+'["\'`]|\\b'+key+'=').test(page),'game env key '+key+' leaks into new-project page');
 check(page.includes('volume_mount_path: opts.volumeMountPath')&&page.includes('image: opts.image'),'payload image/volume missing');
 const menuSrc=form.slice(form.indexOf('export function GamesMenu'),form.indexOf('function Step('));
-check(menuSrc.length>0&&!/\benv\b|fields|\.port\b|extraPorts|volumeMountPath|memory|setupNotes/.test(menuSrc),'Games menu must not show game settings before a game is chosen');
+check(menuSrc.length>0&&!/\.env\b|\.port\b|extraPorts|volumeMountPath|setupNotes/.test(menuSrc),'Games menu must not expose raw game settings before a game is chosen');
+check(menuSrc.includes('gameCatalogConfiguration(game)')&&menuSrc.includes('gameCatalogAvailability(game)'),'Games menu friendly discovery metadata missing');
 check(/<details(?![^>]*\bopen\b)[^>]*><summary[^>]*>Advanced \(raw environment variables\)<\/summary>/.test(form),'raw env must be a collapsed Advanced section');
 check(form.indexOf('Advanced (raw environment variables)')>form.lastIndexOf('<Step n='),'raw env section must come after the guided steps');
 check(form.indexOf('What you need before you start')<form.indexOf('<Step n=')&&form.includes('game.setupNotes.map'),'before-you-start checklist missing');

@@ -1,6 +1,8 @@
 "use client";
 import { useState, type ReactNode } from "react";
-import { GAME_SERVER_PRESETS, GAME_SETUP_STEPS, gamePresetEnvErrors, gameImageError, gameSummaryEnv, gameReviewRows, gameFieldOptionLabel, isSensitiveGameEnv, type GameField, type GameServerPreset, type GameSetupGroup } from "@/lib/game-server-presets";
+import Image from "next/image";
+import { ArrowRight, Gamepad2, Server, SlidersHorizontal, Users } from "lucide-react";
+import { GAME_SERVER_PRESETS, GAME_SETUP_STEPS, gameCatalogAvailability, gameCatalogConfiguration, gamePresetEnvErrors, gameImageError, gameSummaryEnv, gameReviewRows, gameFieldOptionLabel, isSensitiveGameEnv, type GameField, type GameServerPreset, type GameSetupGroup } from "@/lib/game-server-presets";
 import { currentTeam, switchTeam } from "@/lib/api";
 import { TeamSelect } from "@/components/team-picker";
 import { Card, Button, Input } from "@/components/ui";
@@ -14,7 +16,90 @@ const friendly = (message: string, key: string) => message.startsWith(key + " ")
 
 /** Game picker only: no game settings, env keys or ports are shown until a game is chosen. */
 export function GamesMenu({ onSelect, disabled }: { onSelect: (game: GameServerPreset) => void; disabled: boolean }) {
-  return <details className="mb-8 rounded-xl border border-border p-4" open><summary className="cursor-pointer text-lg font-semibold">Games — dedicated hosting</summary><p className="my-3 text-sm text-secondary">Pick a game to start a guided setup. Server name, world, passwords and ports are asked for step by step after you choose.</p><nav aria-label="Games" className="grid gap-2 sm:grid-cols-2">{GAME_SERVER_PRESETS.map(game => <button type="button" key={game.gameId} disabled={disabled} onClick={() => onSelect(game)} className="flex items-start gap-3 rounded-lg border border-border p-3 text-left hover:bg-subtle disabled:opacity-50"><span aria-hidden className="flex h-8 min-w-8 items-center justify-center rounded px-1 text-xs font-bold text-white" style={{ background: game.color }}>{game.tag}</span><span className="min-w-0"><span className="block font-semibold">{game.name.replace(/ Server$/, "")}</span><span className="mt-0.5 line-clamp-2 block text-xs text-secondary">{game.desc}</span></span></button>)}</nav></details>;
+  const minecraft = GAME_SERVER_PRESETS.find(game => game.gameId === "minecraft")!;
+  const otherGames = GAME_SERVER_PRESETS.filter(game => game.gameId !== "minecraft");
+  return (
+    <section id="game-servers" aria-labelledby="game-hosting-title" className="mb-10 scroll-mt-24 rounded-2xl border border-border bg-card p-4 sm:p-6">
+      <div className="mb-5 max-w-2xl">
+        <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-green">
+          <Gamepad2 className="h-4 w-4" aria-hidden="true" /> Games - dedicated hosting
+        </div>
+        <h2 id="game-hosting-title" className="text-2xl font-semibold tracking-tight">Host a Game Server</h2>
+        <p className="mt-2 text-sm font-medium">Choose a game, configure your server, and invite your friends.</p>
+        <p className="mt-1 text-sm text-secondary">
+          Get started with a ready-to-configure game-server preset. DevHub helps manage deployment so you can focus on playing.
+        </p>
+      </div>
+
+      <article className="overflow-hidden rounded-xl border border-border bg-subtle/30">
+        <div className="relative aspect-[16/7] min-h-52 overflow-hidden">
+          <Image
+            src="/games/voxel-world.jpg"
+            alt="Original voxel-art adventurers overlooking a forest, river, and player-built village."
+            fill
+            priority
+            sizes="(max-width: 896px) 100vw, 896px"
+            className="object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent" />
+          <span className="absolute bottom-3 left-3 rounded-full border border-white/30 bg-black/45 px-2 py-1 text-[10px] font-medium text-white backdrop-blur">
+            Featured guided preset
+          </span>
+        </div>
+        <div className="grid gap-5 p-4 sm:grid-cols-[1fr_auto] sm:p-5">
+          <div>
+            <h3 className="text-xl font-semibold">Minecraft Server Hosting</h3>
+            <p className="mt-1 max-w-xl text-sm text-secondary">
+              Create your own Minecraft world, invite your friends, and build something amazing together.
+            </p>
+            <ul className="mt-4 grid gap-2 text-xs text-secondary sm:grid-cols-3">
+              <li className="flex gap-2"><SlidersHorizontal className="mt-0.5 h-4 w-4 shrink-0 text-green" /> Vanilla or Paper, version, mode and world</li>
+              <li className="flex gap-2"><Users className="mt-0.5 h-4 w-4 shrink-0 text-green" /> Player capacity and requested memory</li>
+              <li className="flex gap-2"><Server className="mt-0.5 h-4 w-4 shrink-0 text-green" /> Copy connection details after readiness</li>
+            </ul>
+          </div>
+          <Button
+            type="button"
+            disabled={disabled}
+            onClick={() => onSelect(minecraft)}
+            className="w-full self-end justify-center sm:w-auto"
+          >
+            Deploy Minecraft Server <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </div>
+      </article>
+
+      <div className="mb-3 mt-7">
+        <h3 className="font-semibold">More Games. More Adventures.</h3>
+        <p className="mt-1 text-xs text-secondary">Choose another preset to see its supported settings and hosting requirements.</p>
+      </div>
+      <nav aria-label="Games" className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {otherGames.map(game => (
+          <button
+            type="button"
+            key={game.gameId}
+            disabled={disabled}
+            onClick={() => onSelect(game)}
+            className="flex min-h-32 flex-col rounded-lg border border-border p-3 text-left hover:bg-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green disabled:opacity-50"
+          >
+            <span className="flex w-full items-start justify-between gap-2">
+              <span aria-hidden className="flex h-8 min-w-8 items-center justify-center rounded px-1 text-xs font-bold text-white" style={{ background: game.color }}>{game.tag}</span>
+              <span className="rounded-full bg-subtle px-2 py-1 text-[10px] text-secondary">
+                {gameCatalogAvailability(game)}
+              </span>
+            </span>
+            <span className="mt-3 block font-semibold">{game.name.replace(/ Server$/, "")}</span>
+            <span className="mt-1 line-clamp-2 block text-xs text-secondary">{game.desc}</span>
+            {gameCatalogConfiguration(game) ? <span className="mt-2 line-clamp-1 block text-[10px] text-muted">Configure: {gameCatalogConfiguration(game)}</span> : null}
+          </button>
+        ))}
+      </nav>
+      <p className="mt-4 text-[10px] leading-relaxed text-muted">
+        Presets provide guided configuration, not guaranteed capacity or game availability. Multi-port games require verified direct host ingress.
+        Minecraft is a trademark of Microsoft; this experience is not affiliated with or endorsed by Microsoft or Mojang.
+      </p>
+    </section>
+  );
 }
 
 function Step({ n, title, desc, children }: { n: number; title: string; desc?: string; children: ReactNode }) {
@@ -70,9 +155,9 @@ export function ConfigureGame({ game, onBack, onCreate, deploying, error }: { ga
   };
   const visibleSteps = GAME_SETUP_STEPS.filter(step => step.id === "basics" || step.id === "advanced" || fieldsIn(step.id).length > 0);
   const stepNo = (id: GameSetupGroup) => visibleSteps.findIndex(step => step.id === id) + 1;
-  return <div className="mx-auto max-w-3xl"><button type="button" disabled={deploying} onClick={onBack} className="mb-4 text-sm underline">← Back to Games</button><Card className="p-6"><h1 className="text-2xl font-semibold">Set up your {game.name}</h1><p className="my-3 text-sm text-secondary">{game.desc}</p>
+  return <div className="mx-auto max-w-3xl"><button type="button" disabled={deploying} onClick={onBack} className="mb-4 text-sm underline">Back to Games</button><Card className="p-6"><div className="mb-5 grid grid-cols-3 gap-2 text-xs"><div className="rounded-lg bg-green/10 p-2 text-green"><span className="block font-semibold">1. Choose Your Game</span><span>{game.name.replace(/ Server$/, "")}</span></div><div className={stage === "configure" ? "rounded-lg bg-fg p-2 text-bg" : "rounded-lg bg-green/10 p-2 text-green"}><span className="block font-semibold">2. Configure Your Server</span><span>{stage === "configure" ? "In progress" : "Complete"}</span></div><div className={stage === "review" ? "rounded-lg bg-fg p-2 text-bg" : "rounded-lg bg-subtle p-2 text-secondary"}><span className="block font-semibold">3. Deploy Your Server</span><span>{stage === "review" ? "Review and deploy" : "Next"}</span></div></div><h1 className="text-2xl font-semibold">Configure your {game.name}</h1><p className="my-3 text-sm text-secondary">{game.desc}</p>
   {stage === "configure" ? <>
-    <section aria-label="Before you start" className="mb-5 rounded-lg border border-border bg-subtle/40 p-4"><h2 className="font-semibold">What you need before you start</h2><ul className="mt-2 space-y-1 text-sm">{checklist.map(item => <li key={item} className="flex gap-2"><span aria-hidden>☐</span><span>{item}</span></li>)}</ul><details className="mt-3 text-sm"><summary className="cursor-pointer font-medium">Game-specific notes ({game.setupNotes.length})</summary><ul className="mt-2 space-y-2 text-xs text-secondary">{game.setupNotes.map(note => <li key={note} className="flex gap-2"><span aria-hidden>☐</span><span>{note}</span></li>)}</ul></details><p role="note" className="mt-3 text-xs text-amber-600">Passwords and tokens need the updated backend secret protection. This local backend has not been upgraded yet, so do not enter real credentials or deploy them here.</p></section>
+    <section aria-label="Before you start" className="mb-5 rounded-lg border border-border bg-subtle/40 p-4"><h2 className="font-semibold">What you need before you start</h2><ul className="mt-2 space-y-1 text-sm">{checklist.map(item => <li key={item} className="flex gap-2"><span aria-hidden>-</span><span>{item}</span></li>)}</ul><details className="mt-3 text-sm"><summary className="cursor-pointer font-medium">Game-specific notes ({game.setupNotes.length})</summary><ul className="mt-2 space-y-2 text-xs text-secondary">{game.setupNotes.map(note => <li key={note} className="flex gap-2"><span aria-hidden>-</span><span>{note}</span></li>)}</ul></details><p role="note" className="mt-3 text-xs text-amber-600">Credential safety: do not enter real passwords or tokens unless secure secret storage is confirmed for this DevHub environment.</p></section>
     <Step n={stepNo("basics")} title={GAME_SETUP_STEPS[0].title} desc={GAME_SETUP_STEPS[0].desc}>
       <label className="text-sm"><span className="font-medium">Project name</span><Input aria-label="Project name" className="mt-1" aria-invalid={!!nameError && show("name")} value={name} onBlur={() => touch("name")} onChange={e => setName(e.target.value)} /><span className="mt-1 block text-xs text-secondary">Used for the project and its address in DevHub.</span>{nameError && show("name") && <span role="alert" className="mt-1 block text-xs text-red-600">{nameError}</span>}</label>
       <div className="text-sm"><span className="block font-medium">Team</span><TeamSelect value={team} onChange={setTeam} /></div>
@@ -96,7 +181,7 @@ export function ConfigureGame({ game, onBack, onCreate, deploying, error }: { ga
   </> : <section aria-label="Deployment summary"><h2 className="text-lg font-semibold">Review before creating</h2><dl className="my-3 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm"><dt className="text-secondary">Project</dt><dd>{name}</dd><dt className="text-secondary">Team</dt><dd>{team}</dd><dt className="text-secondary">Memory</dt><dd>{memory}</dd><dt className="text-secondary">Ports</dt><dd>{portList}</dd><dt className="text-secondary">Saved data</dt><dd className="font-mono text-xs">{game.volumeMountPath}</dd><dt className="text-secondary">Image</dt><dd className="break-all font-mono text-xs">{image}</dd></dl>
     {GAME_SETUP_STEPS.map(step => { const rows = gameReviewRows(game, env).filter(r => r.group === step.id); return rows.length ? <div key={step.id} className="my-3"><h3 className="text-sm font-semibold">{step.title}</h3><dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">{rows.map(row => <div key={row.key} className="contents"><dt className="text-secondary">{row.label}</dt><dd className="break-all">{row.value}</dd></div>)}</dl></div> : null; })}
     {!!Object.keys(rawEnv).length && <details className="my-3 text-xs"><summary className="cursor-pointer">Raw environment variables ({Object.keys(rawEnv).length})</summary><dl className="mt-2">{gameSummaryEnv(rawEnv).map(row => <div key={row.key} className="flex gap-3"><dt className="font-mono">{row.key}</dt><dd className="break-all">{row.value}</dd></div>)}</dl></details>}
-    <p className="my-3 text-sm">This review does not prove the game launches, the image pulls, the ports are reachable or the host has capacity.</p><div className="flex gap-2"><Button variant="outline" disabled={deploying} onClick={() => setStage("configure")}>Back to configuration</Button><Button disabled={!canReview || deploying} onClick={submit}>{deploying ? "Creating…" : "Create game server"}</Button></div></section>}
+    <p className="my-3 text-sm">DevHub will still validate capacity, pull the image, start the game, and run its configured readiness checks. Connection details appear only after the deployment is ready.</p><div className="flex gap-2"><Button variant="outline" disabled={deploying} onClick={() => setStage("configure")}>Back to configuration</Button><Button disabled={!canReview || deploying} onClick={submit}>{deploying ? "Deploying..." : "Deploy game server"}</Button></div></section>}
   {(error || submitError) && <p role="alert" className="mt-3 text-sm text-red-600">Deployment failed. Check private operator logs; raw server errors are not shown here.{submitError}</p>}
   </Card></div>;
 }

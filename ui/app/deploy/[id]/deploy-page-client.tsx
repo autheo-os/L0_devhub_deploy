@@ -273,12 +273,14 @@ export function DeployPage({ paramsPromise }: { paramsPromise: Promise<{ id: str
           )}
           <span className="text-sm font-medium">
             {ready
-              ? "Deployment ready"
+              ? "Ready"
               : errored
-                ? "Deployment failed"
+                ? "Action required - deployment failed"
                 : cancelled
                   ? "Deployment cancelled"
-                  : `Deployment started ${elapsed}s ago…`}
+                  : state === "queued"
+                    ? "Finding available capacity"
+                    : `Deploying and checking readiness - ${elapsed}s`}
           </span>
         </div>
 
@@ -355,8 +357,8 @@ export function DeployPage({ paramsPromise }: { paramsPromise: Promise<{ id: str
         </div>
 
         {/* Pending / done steps */}
-        <Step label="Deployment Summary" done={ready} pending={!settled} />
-        <Step label="Assigning Custom Domains" done={ready} pending={!settled} />
+        <Step label="Preparing deployment" done={state !== "queued"} pending={state === "queued"} />
+        <Step label="Checking readiness" done={ready} pending={state === "building"} />
 
         {/* Footer */}
         <div className="flex flex-col gap-3 border-t border-border px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">

@@ -184,17 +184,17 @@ function DeploymentDetail({ id }: { id: string }) {
               ) : (
                 <Loader2 className="h-4 w-4 animate-spin text-secondary" />
               )}
-              {ready ? "Ready" : errored ? "Build Failed" : cancelled ? "Cancelled" : "Building"}
+              {ready ? "Ready" : errored ? "Action Required" : cancelled ? "Cancelled" : state === "queued" ? "Finding Capacity" : "Checking Readiness"}
             </div>
             <p className="mt-2 min-h-[3rem] text-sm text-secondary">
               {errored ? (
                 <span className="font-mono text-xs text-red-500">{errorHeadline(build)}</span>
               ) : ready ? (
-                "Your deployment is live and serving traffic."
+                "The deployment passed its readiness checks. Connection details are available below when this workload exposes a raw game port."
               ) : cancelled ? (
                 "This deployment was cancelled before it finished building."
               ) : (
-                "Your deployment is building…"
+                state === "queued" ? "DevHub is finding available capacity." : "DevHub is deploying the workload, starting it, and checking readiness."
               )}
             </p>
           </div>
@@ -212,7 +212,7 @@ function DeploymentDetail({ id }: { id: string }) {
                     ready ? "bg-green" : errored ? "bg-red-500" : cancelled ? "bg-muted" : "bg-amber-400"
                   }`}
                 />
-                {ready ? "Ready" : errored ? "Error" : cancelled ? "Cancelled" : building ? "Building" : state}
+                {ready ? "Ready" : errored ? "Action required" : cancelled ? "Cancelled" : state === "queued" ? "Finding capacity" : building ? "Checking readiness" : state}
               </span>
             </Meta>
             <Meta label="Duration" icon={<Clock className="h-3.5 w-3.5" />}>
