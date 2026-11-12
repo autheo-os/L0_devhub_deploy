@@ -8565,10 +8565,11 @@ pub async fn functions(
     // compute. A verified `service` delegation asking for its own local slice is
     // the internal aggregation path, so it gets the unfiltered view; everything
     // else stays tenant-scoped exactly as before.
-    let internal = claims
-        .as_ref()
-        .map(|e| e.0.role == "service")
-        .unwrap_or(false);
+    // Only the mesh's own node-to-node delegation (`sub: "mesh-internal"`) may
+    // read the unfiltered, all-tenant view. `role == "service"` alone also
+    // matches the long-lived `world-queue-client` token injected into tenant
+    // deployments, which would let any tenant's code read every tenant's stats.
+    let internal = mesh_deploy_authority(claims.as_ref().map(|e| &e.0));
     let mut list: Vec<Value> = c
         .fluid
         .stats()
@@ -11717,14 +11718,27 @@ async fn apikey_create(
     headers: HeaderMap,
     claims: Option<axum::Extension<crate::auth::Claims>>,
     Json(b): Json<CreateApiKey>,
-) -> Json<Value> {
-    let t = tenant(&c, &headers, claims.as_ref().map(|e| &e.0));
-    let (key, token) = c.apikeys.create(&b.name, &t, &b.role);
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let cl = claims.as_ref().map(|e| &e.0);
+    let t = tenant(&c, &headers, cl);
+    if crate::auth::enforced() && cl.is_none() {
+        return Err((StatusCode::UNAUTHORIZED, "sign in to create API keys".into()));
+    }
+    // The key's role is bounded by the CALLER's verified role, never taken
+    // from the request body as-is (a member used to be able to mint an owner
+    // or service key and pass every owner/admin team gate with it).
+    let role = crate::apikeys::grantable_key_role(
+        cl.map(|cl| cl.role.as_str()),
+        cl.is_some_and(|cl| cl.sub.starts_with("key:")),
+        &b.role,
+    )
+    .map_err(|e| (StatusCode::FORBIDDEN, e.to_string()))?;
+    let (key, token) = c.apikeys.create(&b.name, &t, &role);
     crate::persist::persist(&c);
     // The plaintext token is returned exactly once.
     let mut v = key.public();
     v["token"] = json!(token);
-    Json(v)
+    Ok(Json(v))
 }
 
 async fn apikey_revoke(
@@ -11745,6 +11759,31 @@ async fn apikey_revoke(
 // endpoint is tenant-scoped, so a `hive_…` platform key (Authorization: Bearer)
 // transparently scopes the Vercel-compatible SDK to that key's team. The list/get
 // views are redacted; `/credentials` returns the secret token/connection.
+
+/// Reading an integration's plaintext secrets, or linking/replacing/deleting
+/// one, is a team owner/admin action (or a platform operator's). Any member
+/// used to be able to read every linked OAuth token, or overwrite a team's
+/// integration with their own credentials. Dev mode (no JWT secret) keeps the
+/// single local user unrestricted, matching `resolve_tenant`.
+fn require_integration_admin(
+    claims: Option<&crate::auth::Claims>,
+) -> Result<(), (StatusCode, String)> {
+    if !crate::auth::enforced() {
+        return Ok(());
+    }
+    match claims {
+        Some(cl) if integration_role_allowed(cl) => Ok(()),
+        Some(_) => Err((
+            StatusCode::FORBIDDEN,
+            "integration credentials require a team owner or admin".into(),
+        )),
+        None => Err((StatusCode::UNAUTHORIZED, "missing or invalid bearer token".into())),
+    }
+}
+
+fn integration_role_allowed(cl: &crate::auth::Claims) -> bool {
+    cl.platform_admin || cl.role == "owner" || cl.role == "admin"
+}
 
 async fn integrations_list(
     State(c): State<Arc<CloudState>>,
@@ -11767,6 +11806,7 @@ async fn integration_upsert(
     claims: Option<axum::Extension<crate::auth::Claims>>,
     Json(b): Json<crate::integrations::UpsertReq>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
+    require_integration_admin(claims.as_ref().map(|e| &e.0))?;
     if b.provider.trim().is_empty() {
         return Err((StatusCode::BAD_REQUEST, "provider is required".into()));
     }
@@ -11809,12 +11849,13 @@ async fn integration_credentials(
     headers: HeaderMap,
     claims: Option<axum::Extension<crate::auth::Claims>>,
     Path(id): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Json<Value>, (StatusCode, String)> {
+    require_integration_admin(claims.as_ref().map(|e| &e.0))?;
     let t = tenant(&c, &headers, claims.as_ref().map(|e| &e.0));
     c.integrations
         .get(&t, &id)
         .map(|i| Json(i.full()))
-        .ok_or(StatusCode::NOT_FOUND)
+        .ok_or((StatusCode::NOT_FOUND, "integration not found".into()))
 }
 
 async fn integration_delete(
@@ -11822,11 +11863,12 @@ async fn integration_delete(
     headers: HeaderMap,
     claims: Option<axum::Extension<crate::auth::Claims>>,
     Path(id): Path<String>,
-) -> Json<Value> {
+) -> Result<Json<Value>, (StatusCode, String)> {
+    require_integration_admin(claims.as_ref().map(|e| &e.0))?;
     let t = tenant(&c, &headers, claims.as_ref().map(|e| &e.0));
     let ok = c.integrations.delete(&t, &id);
     crate::persist::persist(&c);
-    Json(json!({ "deleted": ok, "id": id }))
+    Ok(Json(json!({ "deleted": ok, "id": id })))
 }
 
 // ---- Intelligent service graph (Issue #2) ----
@@ -17387,5 +17429,22 @@ mod tenant_isolation_tests {
         assert!(!super::ct_eq("same-secret", "different"));
         assert!(!super::ct_eq("short", "shorter-value"));
         assert!(super::ct_eq("", ""));
+    }
+
+    #[test]
+    fn only_team_owner_admin_or_operator_may_touch_integration_secrets() {
+        let mk = |role: &str, admin: bool| crate::auth::Claims {
+            sub: "u".into(),
+            tenant: "acme".into(),
+            role: role.into(),
+            exp: 0,
+            iat: 0,
+            platform_admin: admin,
+        };
+        assert!(!super::integration_role_allowed(&mk("member", false)));
+        assert!(!super::integration_role_allowed(&mk("service", false)));
+        assert!(super::integration_role_allowed(&mk("admin", false)));
+        assert!(super::integration_role_allowed(&mk("owner", false)));
+        assert!(super::integration_role_allowed(&mk("member", true)));
     }
 }

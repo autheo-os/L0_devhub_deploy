@@ -228,7 +228,7 @@ async fn browser_metering(
     // enforced operator on the outer request.
     let internal = claims
         .as_ref()
-        .map(|extension| extension.0.role == "service")
+        .map(|extension| extension.0.sub == "mesh-internal" && extension.0.role == "service")
         .unwrap_or(false);
     if query.local == Some(true) && internal {
         return Ok(Json(local_view(&cloud)));

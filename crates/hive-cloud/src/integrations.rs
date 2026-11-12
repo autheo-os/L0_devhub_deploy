@@ -11,6 +11,12 @@
 //!
 //! Secrets (`credentials`) are returned ONLY from the explicit credentials
 //! endpoint; the list/get views are redacted (env var names + masked values).
+//!
+//! At rest, every credential and env VALUE is sealed with the fleet at-rest key
+//! (`secrets::encrypt`, `enc:v1:`), so neither the persisted snapshot nor the
+//! store_sync replication payload carries a plaintext OAuth token. Values are
+//! sealed on `upsert` and on `load` (which migrates rows written before sealing
+//! existed) and opened only by [`IntegrationResource::full`].
 
 use hive_core::now_ms;
 use parking_lot::RwLock;
@@ -69,12 +75,30 @@ impl IntegrationResource {
             "provider": self.provider,
             "name": self.name,
             "kind": self.kind,
-            "credentials": self.credentials,
-            "env": self.env,
+            "credentials": open_map(&self.credentials),
+            "env": open_map(&self.env),
             "created_ms": self.created_ms,
             "updated_ms": self.updated_ms,
         })
     }
+}
+
+fn seal_map(m: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    m.into_iter()
+        .map(|(k, v)| (k, crate::secrets::encrypt(&v)))
+        .collect()
+}
+
+fn open_map(m: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    m.iter()
+        .map(|(k, v)| (k.clone(), crate::secrets::decrypt(v)))
+        .collect()
+}
+
+fn seal_record(mut r: IntegrationResource) -> IntegrationResource {
+    r.credentials = seal_map(std::mem::take(&mut r.credentials));
+    r.env = seal_map(std::mem::take(&mut r.env));
+    r
 }
 
 /// Upsert payload from the dashboard's link callback.
@@ -108,7 +132,7 @@ impl IntegrationStore {
         self.items.read().clone()
     }
     pub fn load(&self, data: Vec<IntegrationResource>) {
-        *self.items.write() = data;
+        *self.items.write() = data.into_iter().map(seal_record).collect();
     }
 
     /// Link or update an integration for a team. Idempotent on (team, provider):
@@ -137,8 +161,8 @@ impl IntegrationStore {
             existing.name = name;
             existing.kind = kind;
             existing.entity = req.entity;
-            existing.credentials = req.credentials;
-            existing.env = req.env;
+            existing.credentials = seal_map(req.credentials);
+            existing.env = seal_map(req.env);
             existing.updated_ms = now_ms();
             return existing.clone();
         }
@@ -149,8 +173,8 @@ impl IntegrationStore {
             name,
             kind,
             entity: req.entity,
-            credentials: req.credentials,
-            env: req.env,
+            credentials: seal_map(req.credentials),
+            env: seal_map(req.env),
             created_ms: now_ms(),
             updated_ms: now_ms(),
         };
@@ -246,5 +270,20 @@ mod tests {
         assert_eq!(pubv["has_credentials"], true);
         let full = r.full();
         assert_eq!(full["credentials"]["token"], "secret-xyz");
+    }
+
+    #[test]
+    fn credentials_and_env_are_sealed_at_rest_and_in_replication() {
+        let s = IntegrationStore::new();
+        s.upsert("t", req("stripe"));
+        let snap = serde_json::to_string(&s.snapshot()).unwrap();
+        assert!(!snap.contains("secret-xyz"), "snapshot must not carry plaintext");
+        // Legacy plaintext rows are sealed on load and still open via full().
+        let mut legacy = s.snapshot();
+        legacy[0].credentials.insert("token".into(), "legacy-plain".into());
+        s.load(legacy);
+        let snap = serde_json::to_string(&s.snapshot()).unwrap();
+        assert!(!snap.contains("legacy-plain"));
+        assert_eq!(s.list("t")[0].full()["credentials"]["token"], "legacy-plain");
     }
 }

@@ -162,7 +162,7 @@ pub fn api_key_claims(c: &crate::state::CloudState, token: &str) -> Option<Claim
     Some(Claims {
         sub: format!("key:{}", k.id),
         tenant: k.team,
-        role: k.role,
+        role: crate::apikeys::effective_key_role(&k.role),
         iat: now,
         exp: now + 3600,
         platform_admin: false,
