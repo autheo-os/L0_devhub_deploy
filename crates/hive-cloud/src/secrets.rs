@@ -246,7 +246,9 @@ pub fn encrypt(plaintext: &str) -> String {
     }
     let mut nonce = [0u8; NONCE_LEN];
     if SystemRandom::new().fill(&mut nonce).is_err() {
-        return plaintext.to_string();
+        // Never hand back plaintext as if it were sealed: that would persist
+        // and replicate the secret in the clear without anyone noticing.
+        panic!("secrets::encrypt: system RNG unavailable; refusing to store a secret unsealed");
     }
     let mut buf = plaintext.as_bytes().to_vec();
     if key()

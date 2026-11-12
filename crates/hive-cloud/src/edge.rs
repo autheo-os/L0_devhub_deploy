@@ -2120,12 +2120,22 @@ fn pct(s: &str) -> String {
         .collect()
 }
 
+/// Whether verified claims may open `team`'s protected preview: the team's own
+/// members, or a platform operator. A tenant-scoped `owner` role is never
+/// cross-team authority.
+fn preview_claims_allow(claims: &crate::auth::Claims, team: &str) -> bool {
+    claims.tenant == team || claims.platform_admin
+}
+
 fn has_preview_access(headers: &[(String, String)], team: &str) -> bool {
     // 1) Bearer token (enforced mode): must be valid and scoped to the team.
     if let Some(auth) = header(headers, "authorization") {
         if let Some(tok) = auth.strip_prefix("Bearer ") {
             if let Ok(claims) = crate::auth::verify(tok) {
-                if claims.tenant == team || claims.role == "owner" {
+                // `role == "owner"` used to grant access to ANY team's preview:
+                // every user owns their personal namespace, so every signed-in
+                // user's JWT carries it. Only a platform operator crosses teams.
+                if preview_claims_allow(&claims, team) {
                     return true;
                 }
             }
@@ -2138,7 +2148,7 @@ fn has_preview_access(headers: &[(String, String)], team: &str) -> bool {
             if let Some(val) = kv.strip_prefix("hive_access=") {
                 if crate::auth::enforced() {
                     if let Ok(claims) = crate::auth::verify(val) {
-                        return claims.tenant == team || claims.role == "owner";
+                        return preview_claims_allow(&claims, team);
                     }
                 } else {
                     // Dev mode (no JWT secret): presence of the cookie grants access.
@@ -2726,5 +2736,21 @@ mod tests {
             seen.contains("va1") && seen.contains("va2"),
             "both same-region peers must take first-tried turns, got {seen:?}"
         );
+    }
+
+    #[test]
+    fn a_personal_owner_jwt_does_not_open_another_teams_preview() {
+        let mk = |tenant: &str, role: &str, admin: bool| crate::auth::Claims {
+            sub: "u".into(),
+            tenant: tenant.into(),
+            role: role.into(),
+            exp: 0,
+            iat: 0,
+            platform_admin: admin,
+        };
+        // Every signed-in user is `owner` of their personal namespace.
+        assert!(!super::preview_claims_allow(&mk("u_attacker", "owner", false), "victim-team"));
+        assert!(super::preview_claims_allow(&mk("victim-team", "member", false), "victim-team"));
+        assert!(super::preview_claims_allow(&mk("ops", "owner", true), "victim-team"));
     }
 }

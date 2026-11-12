@@ -33,6 +33,15 @@ const clerkEnabled = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || !!proces
  * This replaces the old per-route random `user-<random>` cookie, which differed
  * between routes (status/connect generated random, repos fell back to "default")
  * and was lost whenever cookies cleared.
+ *
+ * SECURITY: when Clerk is enabled the entity comes ONLY from the verified Clerk
+ * session. The `hive_entity` cookie is client-controlled, and `/api(.*)` is
+ * public in the Clerk middleware, so honouring it there let an unauthenticated
+ * caller set `hive_entity=gh_<victimClerkId>` and act on the victim's GitHub /
+ * Composio connection (list private repos, create repos, disconnect, and have
+ * `/api/git/deploy` clone a private repo with the victim's token). A request
+ * without a Clerk session now gets a fresh, unguessable entity that owns no
+ * connection, so every downstream call finds nothing.
  */
 export async function resolveEntity(): Promise<string> {
   if (clerkEnabled) {
@@ -40,9 +49,11 @@ export async function resolveEntity(): Promise<string> {
       const { userId } = await auth();
       if (userId) return `gh_${userId}`;
     } catch {
-      /* auth() unavailable (e.g. outside request scope) — fall through */
+      /* auth() unavailable (e.g. outside request scope) — fail closed below */
     }
+    return `anon_${randomBytes(16).toString("hex")}`;
   }
+  // Local / no-auth mode only (single operator, no identity provider).
   const cookieEntity = (await cookies()).get("hive_entity")?.value;
   return cookieEntity || "default";
 }

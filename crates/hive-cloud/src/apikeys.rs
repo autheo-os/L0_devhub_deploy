@@ -24,6 +24,55 @@ fn rand_token() -> String {
     )
 }
 
+/// Rank of a TENANT role an API key may carry. `service` is deliberately absent:
+/// it is the mesh's node-to-node delegation role (always a JWT with
+/// `sub: "mesh-internal"`), never something a tenant may hold in a key.
+fn tenant_role_rank(role: &str) -> Option<u8> {
+    match role {
+        "member" => Some(1),
+        "admin" => Some(2),
+        "owner" => Some(3),
+        _ => None,
+    }
+}
+
+/// The role a NEW key gets, or why it is refused. A caller can mint a key with
+/// at most its own team role (a member minting an `owner` key was a privilege
+/// escalation), never `service`, and a key can never mint another key (a leaked
+/// key must not be able to plant credentials that outlive its revocation).
+/// `caller_role == None` means no verified claims, which only reaches here in
+/// dev mode (`!auth::enforced()`), where the single local user is the owner.
+pub fn grantable_key_role(
+    caller_role: Option<&str>,
+    caller_is_key: bool,
+    requested: &str,
+) -> Result<String, &'static str> {
+    if caller_is_key {
+        return Err("an API key cannot create API keys; use a dashboard session");
+    }
+    let requested = if requested.is_empty() { "member" } else { requested };
+    let want = tenant_role_rank(requested).ok_or("role must be one of member, admin, owner")?;
+    let have = match caller_role {
+        Some(r) => tenant_role_rank(r).unwrap_or(0),
+        None => 3,
+    };
+    if want > have {
+        return Err("cannot create a key with a higher role than your own");
+    }
+    Ok(requested.to_string())
+}
+
+/// The role a presented key actually confers. Any stored role outside the
+/// tenant set (e.g. a `service` key minted before [`grantable_key_role`]
+/// existed) is clamped to `member`, so a key can never act as a mesh delegation.
+pub fn effective_key_role(stored: &str) -> String {
+    if tenant_role_rank(stored).is_some() {
+        stored.to_string()
+    } else {
+        "member".to_string()
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ApiKey {
     pub id: String,
@@ -226,5 +275,28 @@ mod tests_ext {
         let s2 = ApiKeyStore::new();
         s2.load(snap);
         assert!(s2.verify(&token).is_some(), "restored key still verifies");
+    }
+
+    #[test]
+    fn member_cannot_mint_owner_admin_or_service_keys() {
+        assert!(grantable_key_role(Some("member"), false, "owner").is_err());
+        assert!(grantable_key_role(Some("member"), false, "admin").is_err());
+        assert!(grantable_key_role(Some("owner"), false, "service").is_err());
+        assert!(grantable_key_role(Some("member"), false, "anything").is_err());
+        assert_eq!(grantable_key_role(Some("member"), false, "").unwrap(), "member");
+        assert_eq!(grantable_key_role(Some("admin"), false, "admin").unwrap(), "admin");
+        assert_eq!(grantable_key_role(Some("owner"), false, "owner").unwrap(), "owner");
+    }
+
+    #[test]
+    fn a_key_can_never_mint_another_key() {
+        assert!(grantable_key_role(Some("owner"), true, "member").is_err());
+    }
+
+    #[test]
+    fn stored_service_or_unknown_key_role_is_clamped_to_member() {
+        assert_eq!(effective_key_role("service"), "member");
+        assert_eq!(effective_key_role(""), "member");
+        assert_eq!(effective_key_role("admin"), "admin");
     }
 }
