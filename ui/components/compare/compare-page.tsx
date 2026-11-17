@@ -33,7 +33,7 @@ function Hero({ c }: { c: Comparison }) {
           />
           <div aria-hidden="true" className="lp-grid -z-10 opacity-50" />
           <p aria-hidden="true" className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[clamp(28px,5vw,56px)] font-medium leading-[1.1] tracking-tight">
-            <span className="lp-gradient-text">shadw</span>
+            <span className="lp-gradient-text">autheo</span>
             <span className="lp-mono text-[0.42em] uppercase tracking-[0.2em] text-zinc-500">vs.</span>
             <span className="text-white"><Tok>{c.rival}</Tok></span>
           </p>
@@ -43,7 +43,7 @@ function Hero({ c }: { c: Comparison }) {
           className="lp-h1 lp-h1-page mx-auto mt-12 max-w-[900px]"
           style={{ fontSize: "clamp(28px, 3.4vw, 48px)", lineHeight: 1.12 }}
         >
-          <span className="text-zinc-500">shadw vs. <Tok>{c.rival}</Tok>.</span>{" "}{c.heroLead}
+          <span className="text-zinc-500">autheo vs. <Tok>{c.rival}</Tok>.</span>{" "}{c.heroLead}
         </h1>
         <p className="lp-sub mx-auto mt-6 max-w-[720px]">{c.heroSub}</p>
 
@@ -73,7 +73,7 @@ function SectionHead({ eyebrow, title, lead }: { eyebrow: string; title: React.R
 function Approaches({ c }: { c: Comparison }) {
   const cols = [
     { n: "01", title: `How ${c.rival} works`, body: c.rivalApproach },
-    { n: "02", title: "How shadw works", body: c.shadwApproach },
+    { n: "02", title: "How autheo works", body: c.shadwApproach },
   ];
   return (
     <MarketingSection className="py-16 sm:py-20">
@@ -107,7 +107,7 @@ function Differences({ c }: { c: Comparison }) {
         eyebrow="What changes"
         title={
           <>
-            What shadw does differently. <span className="text-zinc-500">{c.differencesLead}</span>
+            What autheo does differently. <span className="text-zinc-500">{c.differencesLead}</span>
           </>
         }
       />
@@ -145,12 +145,12 @@ function ComparisonTable({ c }: { c: Comparison }) {
       <SectionHead eyebrow="At a glance" title="The key differences at a glance" />
       <div className="mt-10 overflow-x-auto">
         <table className="w-full min-w-[560px] border-collapse text-left text-[15px] max-md:block max-md:min-w-0">
-          <caption className="sr-only">shadw and {c.rival} compared</caption>
+          <caption className="sr-only">autheo and {c.rival} compared</caption>
           <thead className="max-md:block">
             <tr className="border-b border-white/20 max-md:grid max-md:grid-cols-2">
               <td className="max-md:hidden" />
               <th scope="col" className="w-[40%] py-4 pr-4 text-[18px] font-medium text-white max-md:w-auto">
-                shadw
+                autheo
               </th>
               <th scope="col" className="w-[40%] py-4 text-[18px] font-medium text-zinc-300 max-md:w-auto">
                 <Tok>{c.rival}</Tok>
@@ -177,7 +177,7 @@ function ComparisonTable({ c }: { c: Comparison }) {
 function Fit({ c }: { c: Comparison }) {
   return (
     <MarketingSection className="py-16 sm:py-20">
-      <SectionHead eyebrow="When to choose" title="shadw is a strong fit if…" />
+      <SectionHead eyebrow="When to choose" title="autheo is a strong fit if…" />
       <ul className="mt-10 grid gap-4 md:grid-cols-2">
         {c.fit.map((item) => (
           <li key={item} className="lp-well flex min-h-[76px] items-start gap-3 p-5">

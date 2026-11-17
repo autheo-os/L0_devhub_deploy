@@ -95,15 +95,15 @@ export function IntroLoader() {
       >
         <GlowRing style={{ position: "absolute", inset: 0 }} />
         <Image
-          src="/shadw-logo-dark.png"
-          alt="shadw"
-          width={274}
-          height={91}
+          src="/autheo-devhub-logo.png"
+          alt="Autheo DevHub"
+          width={512}
+          height={512}
           priority
           style={{
             position: "relative",
             zIndex: 1,
-            height: "2.4rem",
+            height: "4.2rem",
             width: "auto",
             animation: "intro-logo-pan 2.2s ease-in-out infinite",
           }}

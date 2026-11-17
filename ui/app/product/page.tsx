@@ -21,11 +21,11 @@ import {
 
 export const metadata: Metadata = pageMeta({
   title: "Product",
-  socialTitle: "Product — shadw",
+  socialTitle: "Product — autheo",
   description:
-    "shadw is a cloud you can self-host: serverless functions, containers, and managed databases, with Vercel-style Git deploys, immutable builds, and rollback to earlier deployments.",
+    "autheo is a cloud you can self-host: serverless functions, containers, and managed databases, with Vercel-style Git deploys, immutable builds, and rollback to earlier deployments.",
   twitterDescription:
-    "shadw is a cloud you can self-host: serverless functions, containers, and managed databases, with Vercel-style Git deploys and rollback to earlier deployments.",
+    "autheo is a cloud you can self-host: serverless functions, containers, and managed databases, with Vercel-style Git deploys and rollback to earlier deployments.",
   path: "/product",
 });
 export const viewport = darkViewport;

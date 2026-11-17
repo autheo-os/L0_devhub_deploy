@@ -1,0 +1,2472 @@
+//! Marketplace L0 capacity allocation boundary.
+//!
+//! This is deliberately a narrow server-to-server API. Marketplace never gets
+//! topology or credentials and DevHub never constructs or relays a buyer's
+//! transaction. Settlement is accepted only after DevHub verifies its receipt.
+
+use std::{collections::BTreeMap, sync::Arc};
+
+use axum::{
+    Router,
+    body::{Body, Bytes},
+    extract::State,
+    http::HeaderMap,
+    middleware::Next,
+    response::{IntoResponse, Json, Response},
+    routing::{get, post},
+};
+use base64::Engine;
+use hmac::{Hmac, Mac};
+use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use sha3::Keccak256;
+use tower::ServiceExt;
+use uuid::Uuid;
+
+use crate::{
+    marketplace_releases::{DevHubWorkloadInstance, MarketplaceLifecycleEvent},
+    marketplace_reservations::AUTHORITY_UNAVAILABLE_REASON,
+    schedule,
+    state::CloudState,
+};
+
+type HmacSha256 = Hmac<Sha256>;
+
+const BASE_CHAIN_ID: u64 = 8453;
+const THEO_TOKEN: &str = "0xebe516a20238f79dc20b07ead6768e08891ed309";
+const FEE_BPS: u16 = 500;
+const CONFIRMATIONS: u64 = 2;
+const BASE_PROFILE: &str = "base-mainnet-v1";
+const AUTHEO_TESTNET_PROFILE: &str = "autheo-testnet-v1";
+const AUTHEO_TESTNET_CHAIN_ID: u64 = 785;
+const AUTHEO_TESTNET_RPC: &str = "https://testnet-rpc1.autheo.com";
+const AUTHEO_TESTNET_EXPLORER: &str = "https://testnet-explorer.autheo.com";
+const ADVERTISEMENT_TTL_MS: u64 = 60_000;
+const INTENT_TTL_MS: u64 = 15 * 60_000;
+const CLOCK_SKEW_MS: u64 = 5 * 60_000;
+const NONCE_TTL_MS: u64 = 10 * 60_000;
+const SETTLEMENT_SIGNATURE: &str =
+    "Settlement(bytes32,bytes32,address,address,address,uint256,uint256,address,uint256,uint256)";
+const HISTORICAL_SETTLEMENT_SIGNATURE: &str =
+    "Settlement(bytes32,address,address,uint256,address,uint256,address,uint256,uint256)";
+const SETTLEMENT_V2: u8 = 2;
+const SETTLEMENT_V1: u8 = 1;
+const SETTLEMENT_ACTIVE: &str = "active";
+const SETTLEMENT_HISTORICAL: &str = "historical";
+const MAX_HARDWARE_MODEL_LEN: usize = 160;
+const MAX_CPU_THREADS: u32 = 65_536;
+const MAX_MEMORY_MIB: u64 = 16 * 1024 * 1024;
+const MAX_GPU_COUNT: u32 = 1_024;
+const MAX_GPU_VRAM_MIB: u64 = 16 * 1024 * 1024;
+const MAX_WORKLOAD_VCPU: u32 = 65_536;
+const MAX_WORKLOAD_MEMORY_MIB: u64 = 16 * 1024 * 1024;
+const MAX_WORKLOAD_STORAGE_GIB: u64 = 16 * 1024 * 1024;
+const MAX_CONTINUITY_OBJECTIVE_SECONDS: u64 = 366 * 24 * 60 * 60;
+
+#[derive(Serialize)]
+struct ApiError {
+    error: &'static str,
+}
+
+struct MarketplaceError(axum::http::StatusCode, &'static str);
+impl IntoResponse for MarketplaceError {
+    fn into_response(self) -> Response {
+        (self.0, Json(ApiError { error: self.1 })).into_response()
+    }
+}
+type ApiResult<T> = Result<Json<T>, MarketplaceError>;
+
+fn error(status: axum::http::StatusCode, value: &'static str) -> MarketplaceError {
+    MarketplaceError(status, value)
+}
+
+/// Replicated, durable facts required for round-robin API requests.
+#[derive(Default, Clone, Serialize, Deserialize)]
+pub struct MarketplaceSecuritySnapshot {
+    #[serde(default)]
+    nonces: BTreeMap<String, u64>,
+    #[serde(default)]
+    deployments: BTreeMap<String, ListedDeployment>,
+    #[serde(default)]
+    payment_intents: BTreeMap<String, PaymentIntent>,
+    #[serde(default)]
+    payment_idempotency: BTreeMap<String, String>,
+    /// Body digests bind a logical idempotency key to one request. Older
+    /// snapshots lack these facts, so only newly created operations receive
+    /// the stronger conflicting-reuse protection.
+    #[serde(default)]
+    payment_idempotency_digests: BTreeMap<String, String>,
+    /// Settlement-key ownership is independent of business order reference.
+    /// It prevents the same V2 on-chain settlement from verifying two intents.
+    #[serde(default)]
+    verified_settlement_keys: BTreeMap<String, String>,
+    #[serde(default)]
+    allocation_idempotency: BTreeMap<String, String>,
+    #[serde(default)]
+    allocation_idempotency_digests: BTreeMap<String, String>,
+}
+
+#[derive(Default)]
+pub struct MarketplaceSecurityStore(RwLock<MarketplaceSecuritySnapshot>);
+impl MarketplaceSecurityStore {
+    pub fn snapshot(&self) -> MarketplaceSecuritySnapshot {
+        self.0.read().clone()
+    }
+    pub fn load(&self, snapshot: MarketplaceSecuritySnapshot) {
+        *self.0.write() = snapshot;
+    }
+    fn consume_nonce(&self, key: String, now: u64) -> bool {
+        let mut state = self.0.write();
+        state.nonces.retain(|_, expires| *expires > now);
+        if state.nonces.contains_key(&key) {
+            return false;
+        }
+        state.nonces.insert(key, now + NONCE_TTL_MS);
+        true
+    }
+    fn replace_deployments(&self, listed: Vec<ListedDeployment>) {
+        let mut state = self.0.write();
+        state
+            .deployments
+            .retain(|_, entry| entry.expires_at_ms > hive_core::now_ms());
+        for entry in listed {
+            state.deployments.insert(entry.deployment_id.clone(), entry);
+        }
+    }
+    fn deployment(&self, id: &str) -> Option<ListedDeployment> {
+        self.0.read().deployments.get(id).cloned()
+    }
+    fn intent_for_key(&self, key: &str, body_digest: &str) -> Result<Option<PaymentIntent>, ()> {
+        let state = self.0.read();
+        let Some(id) = state.payment_idempotency.get(key) else {
+            return Ok(None);
+        };
+        if let Some(existing_digest) = state.payment_idempotency_digests.get(key) {
+            if existing_digest != body_digest {
+                return Err(());
+            }
+        }
+        Ok(state
+            .payment_idempotency
+            .get(key)
+            .and_then(|id| state.payment_intents.get(id))
+            .cloned())
+    }
+    fn put_intent(
+        &self,
+        key: String,
+        body_digest: String,
+        intent: PaymentIntent,
+    ) -> Result<PaymentIntent, ()> {
+        let mut state = self.0.write();
+        if let Some(id) = state.payment_idempotency.get(&key) {
+            if let Some(old) = state.payment_intents.get(id) {
+                return match state.payment_idempotency_digests.get(&key) {
+                    Some(existing_digest) if existing_digest != &body_digest => Err(()),
+                    _ => Ok(old.clone()),
+                };
+            }
+        }
+        state
+            .payment_idempotency
+            .insert(key.clone(), intent.payment_intent_id.clone());
+        state.payment_idempotency_digests.insert(key, body_digest);
+        state
+            .payment_intents
+            .insert(intent.payment_intent_id.clone(), intent.clone());
+        Ok(intent)
+    }
+    fn intent(&self, id: &str) -> Option<PaymentIntent> {
+        self.0.read().payment_intents.get(id).cloned()
+    }
+    fn update_intent(&self, intent: PaymentIntent) {
+        self.0
+            .write()
+            .payment_intents
+            .insert(intent.payment_intent_id.clone(), intent);
+    }
+    fn bind_verified_settlement_key(&self, intent_id: &str, settlement_key: &str) -> bool {
+        let mut state = self.0.write();
+        match state.verified_settlement_keys.get(settlement_key) {
+            Some(owner) => owner == intent_id,
+            None => {
+                state
+                    .verified_settlement_keys
+                    .insert(settlement_key.to_owned(), intent_id.to_owned());
+                true
+            }
+        }
+    }
+    fn allocation_for_key(&self, key: &str, body_digest: &str) -> Result<Option<String>, ()> {
+        let state = self.0.read();
+        let Some(allocation_id) = state.allocation_idempotency.get(key) else {
+            return Ok(None);
+        };
+        if let Some(existing_digest) = state.allocation_idempotency_digests.get(key) {
+            if existing_digest != body_digest {
+                return Err(());
+            }
+        }
+        Ok(Some(allocation_id.clone()))
+    }
+    fn bind_allocation_key(&self, key: String, body_digest: String, id: String) -> Result<(), ()> {
+        let mut state = self.0.write();
+        if let Some(existing_id) = state.allocation_idempotency.get(&key) {
+            return match state.allocation_idempotency_digests.get(&key) {
+                Some(existing_digest) if existing_digest != &body_digest => Err(()),
+                _ if existing_id == &id => Ok(()),
+                _ => Err(()),
+            };
+        }
+        state.allocation_idempotency.insert(key.clone(), id);
+        state
+            .allocation_idempotency_digests
+            .insert(key, body_digest);
+        Ok(())
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct ListedDeployment {
+    deployment_id: String,
+    provider_id: String,
+    canonical_node_id: String,
+    provider_recipient: String,
+    region: String,
+    runtime: String,
+    capabilities: Capabilities,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hardware: Option<MarketplaceHardware>,
+    expires_at_ms: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct Capabilities {
+    vcpu: u32,
+    ram_mib: u64,
+    gpu: Gpu,
+    storage_gib: u64,
+}
+#[derive(Clone, Serialize, Deserialize)]
+struct Gpu {
+    model: Option<String>,
+    count: u32,
+}
+
+/// The intentionally narrow Marketplace L0 advertisement contract.
+///
+/// Internal listings retain the additional scheduling data needed for
+/// settlement and placement. This projection prevents that data from becoming
+/// part of the Marketplace response by accident.
+#[derive(Serialize)]
+struct MarketplaceDeploymentsResponse {
+    data: Vec<MarketplaceDeployment>,
+}
+
+#[derive(Serialize)]
+struct MarketplaceDeployment {
+    deployment_id: String,
+    provider_id: String,
+    canonical_node_id: String,
+    provider_recipient: String,
+    region: String,
+    runtime: String,
+    capabilities: MarketplaceCapabilities,
+    availability: MarketplaceAvailability,
+    health: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hardware: Option<MarketplaceHardware>,
+    issued_at: String,
+    expires_at: String,
+    revoked_at: Option<String>,
+    configuration_reference: &'static str,
+}
+
+#[derive(Serialize)]
+struct MarketplaceCapabilities {
+    vcpu: u32,
+    ram_mib: u64,
+    storage_gib: u64,
+}
+
+/// Purpose-specific, Marketplace-safe hardware projection. Never serialize a
+/// registry node directly: registry nodes contain peer addresses, URLs, labels,
+/// and other topology that do not belong at this boundary.
+#[derive(Clone, Serialize, Deserialize)]
+struct MarketplaceHardware {
+    cpu: MarketplaceCpu,
+    memory: MarketplaceMemory,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    gpus: Vec<MarketplaceGpu>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct MarketplaceCpu {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    physical_cores: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    threads: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    architecture: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct MarketplaceMemory {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total_mib: Option<u64>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct MarketplaceGpu {
+    vendor: String,
+    model: String,
+    count: u32,
+    vram_mib_each: u64,
+}
+
+#[derive(Serialize)]
+struct MarketplaceAvailability {
+    available: bool,
+    capacity_units: u8,
+}
+
+impl MarketplaceDeployment {
+    fn from_listed(entry: ListedDeployment, issued_at_ms: u64) -> Self {
+        Self {
+            deployment_id: entry.deployment_id,
+            provider_id: entry.provider_id,
+            canonical_node_id: entry.canonical_node_id,
+            provider_recipient: entry.provider_recipient,
+            region: entry.region,
+            runtime: entry.runtime,
+            capabilities: MarketplaceCapabilities {
+                vcpu: entry.capabilities.vcpu,
+                ram_mib: entry.capabilities.ram_mib,
+                storage_gib: entry.capabilities.storage_gib,
+            },
+            hardware: entry.hardware,
+            availability: MarketplaceAvailability {
+                available: true,
+                capacity_units: 1,
+            },
+            health: "healthy",
+            issued_at: iso_millis_timestamp(issued_at_ms),
+            expires_at: iso_millis_timestamp(entry.expires_at_ms),
+            revoked_at: None,
+            configuration_reference: "l0-config-v1",
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct SettlementConfig {
+    #[serde(default)]
+    profile: String,
+    #[serde(default)]
+    network: String,
+    currency: String,
+    chain_id: u64,
+    #[serde(default)]
+    chain_id_hex: String,
+    token_contract: String,
+    token_decimals: u8,
+    #[serde(default)]
+    rpc_url: String,
+    #[serde(default)]
+    explorer_url: String,
+    fee_recipient: String,
+    fee_bps: u16,
+    settlement_contract: String,
+    settlement_event_signature: String,
+    confirmation_policy: ConfirmationPolicy,
+    configuration_reference: String,
+    #[serde(default)]
+    settlement_contract_version: u8,
+    #[serde(default)]
+    settlement_contract_status: String,
+    #[serde(default)]
+    audited_approved: bool,
+    #[serde(default)]
+    eligible_for_new_intents: bool,
+}
+#[derive(Clone, Serialize, Deserialize)]
+struct ConfirmationPolicy {
+    minimum_confirmations: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct PaymentIntent {
+    payment_intent_id: String,
+    expires_at_ms: u64,
+    order_reference: String,
+    gross_amount_atomic: String,
+    buyer_address: String,
+    deployment: ListedDeployment,
+    provider_amount_atomic: String,
+    fee_amount_atomic: String,
+    settlement: SettlementConfig,
+    verification_status: String,
+    transaction_hash: Option<String>,
+    /// The cryptographic replay identity for V2. `order_reference` is a
+    /// business identifier only and must never be used as the on-chain key.
+    #[serde(default)]
+    settlement_key: Option<String>,
+    #[serde(default)]
+    settlement_event_log_index: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ResourceRequirements {
+    #[serde(default)]
+    pub vcpu: u32,
+    #[serde(default)]
+    pub memory_mb: u64,
+    #[serde(default)]
+    pub disk_gb: u64,
+    #[serde(default)]
+    pub gpu: bool,
+    #[serde(default)]
+    pub runtime: Option<String>,
+    #[serde(default)]
+    pub region: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Allocation {
+    /// DevHub-issued opaque allocation handle. Older persisted rows used the
+    /// Marketplace order reference as their map key; `load` derives a stable
+    /// compatibility value for those rows rather than exposing that reference
+    /// as a new allocation handle.
+    #[serde(default)]
+    pub allocation_id: String,
+    pub marketplace_order_id: String,
+    pub tenant_id: String,
+    pub resources: ResourceRequirements,
+    pub approved_node_ids: Vec<String>,
+    pub theo_amount: String,
+    pub expires_at_ms: u64,
+    pub contract_reference: String,
+    pub advertisement_id: String,
+    pub status: String,
+    pub routed_build_id: Option<String>,
+    pub created_at_ms: u64,
+    pub updated_at_ms: u64,
+    #[serde(default)]
+    pub settlement_key: Option<String>,
+    #[serde(default)]
+    pub configuration_reference: Option<String>,
+    /// The only Marketplace-supplied workload material we accept. These are
+    /// opaque DevHub identities, never a URL, image, deployment manifest, or
+    /// node selection.
+    #[serde(default)]
+    pub workload_order_id: Option<String>,
+    #[serde(default)]
+    pub workload_handoff_id: Option<String>,
+}
+#[derive(Default)]
+pub struct AllocationStore(RwLock<BTreeMap<String, Allocation>>);
+impl AllocationStore {
+    pub fn snapshot(&self) -> Vec<Allocation> {
+        self.0.read().values().cloned().collect()
+    }
+    pub fn load(&self, rows: Vec<Allocation>) {
+        let mut state = self.0.write();
+        state.clear();
+        state.extend(rows.into_iter().map(|mut row| {
+            if row.allocation_id.is_empty() {
+                row.allocation_id = format!("alloc_{}", row.marketplace_order_id);
+            }
+            (row.allocation_id.clone(), row)
+        }));
+    }
+    pub(crate) fn get(&self, id: &str) -> Option<Allocation> {
+        self.0.read().get(id).cloned()
+    }
+    pub(crate) fn for_workload_order(&self, workload_order_id: &str) -> Option<Allocation> {
+        self.0
+            .read()
+            .values()
+            .find(|allocation| {
+                allocation.workload_order_id.as_deref() == Some(workload_order_id)
+                    && allocation.status == "scheduled"
+            })
+            .cloned()
+    }
+    fn put_if_absent(&self, allocation: Allocation) -> Result<Allocation, Allocation> {
+        let mut state = self.0.write();
+        if let Some(old) = state.get(&allocation.allocation_id) {
+            return Err(old.clone());
+        }
+        // Settlement/order binding is consumed only once. A caller that loses
+        // its result must reuse its idempotency key, never create a second
+        // entitlement for the same paid order with a fresh key.
+        if let Some(old) = state
+            .values()
+            .find(|old| old.marketplace_order_id == allocation.marketplace_order_id)
+        {
+            return Err(old.clone());
+        }
+        state.insert(allocation.allocation_id.clone(), allocation.clone());
+        Ok(allocation)
+    }
+    fn update(&self, allocation: Allocation) {
+        self.0
+            .write()
+            .insert(allocation.allocation_id.clone(), allocation);
+    }
+}
+
+#[derive(Deserialize)]
+struct PaymentIntentRequest {
+    deployment_id: String,
+    provider_id: String,
+    canonical_node_id: String,
+    order_reference: String,
+    gross_amount_atomic: String,
+    buyer_address: String,
+}
+#[derive(Deserialize)]
+struct PaymentVerificationRequest {
+    payment_intent_id: String,
+    transaction_hash: String,
+}
+#[derive(Deserialize)]
+struct AllocationRequest {
+    payment_intent_id: String,
+    tenant_id: String,
+    resources: ResourceRequirements,
+    #[serde(default)]
+    marketplace: Option<MarketplaceWorkloadOrder>,
+    #[serde(default)]
+    workload: Option<MarketplaceWorkloadReference>,
+}
+
+#[derive(Deserialize)]
+struct MarketplaceWorkloadOrder {
+    workload_order_id: String,
+    buyer_tenant_id: String,
+    idempotency_key: String,
+}
+
+#[derive(Deserialize)]
+struct MarketplaceWorkloadReference {
+    project_id: String,
+    release_id: String,
+    revision: String,
+}
+
+/// The Marketplace-to-DevHub execution request. This contains commercial
+/// intent only. `deny_unknown_fields` is load-bearing: it rejects a provider,
+/// node, URL, image tag, manifest, secret, or storage implementation rather
+/// than silently accepting a field which a future implementation might use.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkloadIntentRequest {
+    workload_order_id: String,
+    buyer_tenant_id: String,
+    idempotency_key: String,
+    project_id: String,
+    release_id: String,
+    revision: String,
+    term: CommercialTerm,
+    capacity_requirements: WorkloadCapacityRequirements,
+    continuity_policy: WorkloadContinuityPolicy,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommercialTerm {
+    starts_at: String,
+    ends_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkloadCapacityRequirements {
+    vcpu: u32,
+    memory_mib: u64,
+    storage_gib: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkloadContinuityPolicy {
+    mode: String,
+    recovery_point_objective_seconds: u64,
+    recovery_time_objective_seconds: u64,
+}
+
+/// Phase 4B contract parser only. This endpoint deliberately does not assign
+/// capacity until DevHub has a Marketplace-backed, independently verifiable
+/// commercial-policy and network-authorization authority.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkloadIntentV2Request {
+    contract_version: String,
+    workload_order_id: String,
+    buyer_tenant_id: String,
+    idempotency_key: String,
+    project_id: String,
+    release_id: String,
+    revision: String,
+    commercial_authorization_ref: String,
+    commercial_term: CommercialTerm,
+    workload: WorkloadSpecV2,
+    policy: WorkloadPolicyV2,
+    placement: WorkloadPlacementV2,
+    continuity_policy: WorkloadContinuityPolicy,
+    /// This is deliberately a structured claim rather than an asserted tier
+    /// number. It remains insufficient until its Marketplace issuer, key
+    /// rotation, revocation and freshness lookup are configured in DevHub.
+    commercial_authorization: CommercialAuthorizationV2,
+    #[serde(default)]
+    preferred_network_authorization: Option<PreferredNetworkAuthorizationV2>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkloadSpecV2 {
+    template: String,
+    workload_class: String,
+    capacity_requirements: WorkloadCapacityRequirements,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkloadPolicyV2 {
+    scheduling_policy_version: String,
+    commercial_policy_version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkloadPlacementV2 {
+    mode: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommercialAuthorizationV2 {
+    issuer: String,
+    authorization_id: String,
+    policy_version: String,
+    issued_at: String,
+    expires_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PreferredNetworkAuthorizationV2 {
+    network_id: String,
+    membership_revision: String,
+    issuer: String,
+    authorization_id: String,
+    issued_at: String,
+    expires_at: String,
+}
+
+/// All Marketplace service routes live beneath this router-level HMAC gate.
+/// Keeping the gate here makes adding a route to `/v1/marketplace/*` through
+/// this module safe by default: handlers receive the original raw bytes only
+/// after the signature, timestamp, digest, and nonce have been verified.
+pub fn routes(cloud: Arc<CloudState>) -> Router {
+    Router::new()
+        .route("/v1/marketplace/l0/deployments", get(list_deployments))
+        .route(
+            "/v1/marketplace/payment-intents",
+            post(create_payment_intent),
+        )
+        .route("/v1/marketplace/payments/verify", post(verify_payment))
+        .route("/v1/marketplace/l0/allocations", post(submit_allocation))
+        .route("/v1/marketplace/workloads", post(submit_workload_intent))
+        .route(
+            "/v1/marketplace/workload-intents/v2",
+            post(validate_workload_intent_v2),
+        )
+        .route_layer(axum::middleware::from_fn_with_state(
+            cloud.clone(),
+            verify_marketplace_hmac,
+        ))
+        .with_state(cloud)
+}
+
+/// Execute a Marketplace request received through the private node gateway.
+///
+/// The gateway serializes only the contract's allowlisted headers and raw body
+/// over authenticated Iroh gossip.  Reconstructing an ordinary request here
+/// intentionally routes it through [`routes`], so HMAC validation and nonce
+/// consumption remain at the receiving service node and happen exactly once.
+pub(crate) async fn mesh_dispatch(
+    cloud: Arc<CloudState>,
+    request: crate::marketplace_gateway::MarketplaceMeshRequest,
+) -> Option<crate::marketplace_gateway::MarketplaceMeshResponse> {
+    let body = base64::engine::general_purpose::STANDARD
+        .decode(request.body_b64)
+        .ok()?;
+    let method = request.method.parse::<axum::http::Method>().ok()?;
+    let mut builder = axum::http::Request::builder()
+        .method(method)
+        .uri(&request.path);
+    for (name, value) in request.headers {
+        let name = axum::http::header::HeaderName::from_bytes(name.as_bytes()).ok()?;
+        let value = value.parse::<axum::http::HeaderValue>().ok()?;
+        builder = builder.header(name, value);
+    }
+    let response = routes(cloud)
+        .oneshot(builder.body(Body::from(body)).ok()?)
+        .await
+        .ok()?;
+    let (parts, body) = response.into_parts();
+    let body = axum::body::to_bytes(body, 16 * 1024 * 1024).await.ok()?;
+    Some(crate::marketplace_gateway::MarketplaceMeshResponse {
+        status: parts.status.as_u16(),
+        content_type: parts
+            .headers
+            .get(axum::http::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(ToOwned::to_owned),
+        body_b64: base64::engine::general_purpose::STANDARD.encode(body),
+    })
+}
+
+/// Nodes suitable for terminating a Marketplace gateway request.  The
+/// advertised capacity filter is deliberately the same one that Marketplace
+/// receives; this prevents a gateway from selecting a node which the service
+/// itself would not expose for an allocation.
+pub(crate) fn gateway_targets(cloud: &CloudState) -> Vec<String> {
+    let mut targets: Vec<String> = listed_deployments(cloud)
+        .into_iter()
+        .map(|entry| entry.canonical_node_id)
+        .collect();
+    targets.sort();
+    targets.dedup();
+    // Genesis can serve the API before an operator has configured a provider
+    // recipient.  HMAC remains mandatory; this merely avoids a needless
+    // self-dial for the local private gateway.
+    if targets.is_empty() {
+        targets.push(cloud.node_name.clone());
+    }
+    targets
+}
+
+/// Operator-only visibility intentionally remains separate from the
+/// Marketplace service API and exposes no Marketplace credentials.
+pub async fn operator_view(
+    State(cloud): State<Arc<CloudState>>,
+    claims: Option<axum::Extension<crate::auth::Claims>>,
+) -> Result<Json<Value>, (axum::http::StatusCode, String)> {
+    crate::admin::require_operator(claims.as_ref().map(|claim| &claim.0))?;
+    Ok(Json(json!({
+        "eligible_deployments": listed_deployments(&cloud).into_iter().map(|entry| json!({
+            "deployment_id": entry.deployment_id,
+            "provider_id": entry.provider_id,
+            "canonical_node_id": entry.canonical_node_id,
+            "region": entry.region
+        })).collect::<Vec<_>>(),
+        "allocations": cloud.marketplace_allocations.snapshot()
+    })))
+}
+
+fn required_env(name: &str) -> Result<String, MarketplaceError> {
+    std::env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            error(
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "marketplace_unavailable",
+            )
+        })
+}
+
+fn normalized_address(value: &str) -> Option<String> {
+    let value = value.trim();
+    (value.len() == 42
+        && value.starts_with("0x")
+        && value[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
+        && value[2..].bytes().any(|byte| byte != b'0'))
+    .then(|| value.to_ascii_lowercase())
+}
+
+fn settlement_config_static() -> Result<SettlementConfig, MarketplaceError> {
+    match std::env::var("HIVE_MARKETPLACE_SETTLEMENT_PROFILE")
+        .ok()
+        .as_deref()
+    {
+        Some(AUTHEO_TESTNET_PROFILE) => {
+            // This is deliberately a separate allowlisted profile. No RPC,
+            // chain-id, or generic environment setting can repoint mainnet.
+            if std::env::var("HIVE_MARKETPLACE_TESTNET_ATOMIC_SPLIT_AUDITED")
+                .ok()
+                .as_deref()
+                != Some("1")
+            {
+                return Err(error(
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "settlement_unavailable",
+                ));
+            }
+            let token_contract =
+                normalized_address(&required_env("HIVE_MARKETPLACE_TESTNET_THEO_TOKEN")?)
+                    .ok_or_else(|| {
+                        error(
+                            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                            "settlement_unavailable",
+                        )
+                    })?;
+            let settlement_contract = normalized_address(&required_env(
+                "HIVE_MARKETPLACE_TESTNET_ATOMIC_SPLIT_CONTRACT",
+            )?)
+            .ok_or_else(|| {
+                error(
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "settlement_unavailable",
+                )
+            })?;
+            let fee_recipient =
+                normalized_address(&required_env("HIVE_MARKETPLACE_TESTNET_FEE_RECIPIENT")?)
+                    .ok_or_else(|| {
+                        error(
+                            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                            "settlement_unavailable",
+                        )
+                    })?;
+            let reference = required_env("HIVE_MARKETPLACE_TESTNET_CONFIGURATION_REFERENCE")?;
+            Ok(SettlementConfig {
+                profile: AUTHEO_TESTNET_PROFILE.into(),
+                network: "Autheo Testnet".into(),
+                currency: "THEO".into(),
+                chain_id: AUTHEO_TESTNET_CHAIN_ID,
+                chain_id_hex: "0x311".into(),
+                token_contract,
+                token_decimals: 18,
+                rpc_url: AUTHEO_TESTNET_RPC.into(),
+                explorer_url: AUTHEO_TESTNET_EXPLORER.into(),
+                fee_recipient,
+                fee_bps: FEE_BPS,
+                settlement_contract,
+                settlement_event_signature: SETTLEMENT_SIGNATURE.into(),
+                confirmation_policy: ConfirmationPolicy {
+                    minimum_confirmations: CONFIRMATIONS,
+                },
+                configuration_reference: reference,
+                settlement_contract_version: SETTLEMENT_V2,
+                settlement_contract_status: SETTLEMENT_ACTIVE.into(),
+                audited_approved: true,
+                eligible_for_new_intents: true,
+            })
+        }
+        None => {
+            // A mainnet address is not a test switch. This existing audited
+            // mainnet gate remains independently required.
+            if std::env::var("HIVE_MARKETPLACE_ATOMIC_SPLIT_AUDITED")
+                .ok()
+                .as_deref()
+                != Some("1")
+            {
+                return Err(error(
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "settlement_unavailable",
+                ));
+            }
+            let settlement_contract =
+                normalized_address(&required_env("HIVE_MARKETPLACE_ATOMIC_SPLIT_CONTRACT")?)
+                    .ok_or_else(|| {
+                        error(
+                            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                            "settlement_unavailable",
+                        )
+                    })?;
+            let fee_recipient = normalized_address(&required_env(
+                "HIVE_MARKETPLACE_FEE_RECIPIENT",
+            )?)
+            .ok_or_else(|| {
+                error(
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "settlement_unavailable",
+                )
+            })?;
+            let reference = required_env("HIVE_MARKETPLACE_SETTLEMENT_CONFIGURATION_REFERENCE")?;
+            if reference != "base-theo-atomic-split-v1" {
+                return Err(error(
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "settlement_unavailable",
+                ));
+            }
+            let rpc_url = required_env("THEO_RPC_URL")?;
+            if !rpc_url.starts_with("https://") {
+                return Err(error(
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "settlement_unavailable",
+                ));
+            }
+            Ok(SettlementConfig {
+                profile: BASE_PROFILE.into(),
+                network: "Base Mainnet".into(),
+                currency: "THEO".into(),
+                chain_id: BASE_CHAIN_ID,
+                chain_id_hex: "0x2105".into(),
+                token_contract: THEO_TOKEN.into(),
+                token_decimals: 18,
+                rpc_url,
+                explorer_url: "https://basescan.org".into(),
+                fee_recipient,
+                fee_bps: FEE_BPS,
+                settlement_contract,
+                settlement_event_signature: HISTORICAL_SETTLEMENT_SIGNATURE.into(),
+                confirmation_policy: ConfirmationPolicy {
+                    minimum_confirmations: CONFIRMATIONS,
+                },
+                configuration_reference: reference,
+                // Base's currently configured deployment predates the V2
+                // contract. It remains verifiable only for snapshots already
+                // issued; it cannot be selected for new intents.
+                settlement_contract_version: SETTLEMENT_V1,
+                settlement_contract_status: SETTLEMENT_HISTORICAL.into(),
+                audited_approved: true,
+                eligible_for_new_intents: false,
+            })
+        }
+        Some(_) => Err(error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "settlement_unavailable",
+        )),
+    }
+}
+
+async fn settlement_config(cloud: &CloudState) -> Result<SettlementConfig, MarketplaceError> {
+    let config = settlement_config_static()?;
+    if config.profile == AUTHEO_TESTNET_PROFILE {
+        // Testnet is not merely syntactically configured: prove the fixed RPC
+        // is chain 785 and both configured contracts exist there. THEO's
+        // standard ERC-20 symbol is also checked before publishing the profile.
+        if marketplace_rpc(cloud, &config.rpc_url, "eth_chainId", json!([]))
+            .await
+            .and_then(|value| hex_u64(&value))
+            != Some(AUTHEO_TESTNET_CHAIN_ID)
+            || !evm_code_exists(cloud, &config.rpc_url, &config.token_contract).await
+            || !evm_code_exists(cloud, &config.rpc_url, &config.settlement_contract).await
+            || evm_token_symbol(cloud, &config.rpc_url, &config.token_contract)
+                .await
+                .as_deref()
+                != Some("THEO")
+        {
+            return Err(error(
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "settlement_unavailable",
+            ));
+        }
+    }
+    Ok(config)
+}
+
+fn provider_registry() -> BTreeMap<String, String> {
+    // This is operator-owned registry data, never Marketplace input. Every
+    // advertised provider must have a verified recipient entry.
+    let configured = std::env::var("HIVE_MARKETPLACE_PROVIDER_RECIPIENTS").unwrap_or_default();
+    configured
+        .split(',')
+        .filter_map(|entry| {
+            let (provider, recipient) = entry.split_once('=')?;
+            normalized_address(recipient).map(|recipient| (provider.trim().to_owned(), recipient))
+        })
+        .collect()
+}
+
+fn hmac_secret(key_id: &str) -> Option<String> {
+    std::env::var("HIVE_MARKETPLACE_HMAC_KEYS")
+        .ok()?
+        .split(',')
+        .filter_map(|entry| entry.split_once(':'))
+        .find_map(|(id, secret)| (id == key_id && !secret.is_empty()).then(|| secret.to_owned()))
+}
+
+/// DevHub callback keys are directional and intentionally separate from the
+/// Marketplace-to-DevHub request keys. Multiple comma-separated key ids allow
+/// overlap during rotation without accepting an unrecognised sender key.
+fn devhub_event_secret(key_id: &str) -> Option<String> {
+    std::env::var("HIVE_DEVHUB_EVENT_HMAC_KEYS")
+        .ok()?
+        .split(',')
+        .filter_map(|entry| entry.split_once(':'))
+        .find_map(|(id, secret)| (id == key_id && !secret.is_empty()).then(|| secret.to_owned()))
+}
+
+fn verify_marketplace_request(
+    cloud: &Arc<CloudState>,
+    method: &str,
+    path: &str,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> Result<(), MarketplaceError> {
+    let header = |name| headers.get(name).and_then(|value| value.to_str().ok());
+    let key_id = header("x-marketplace-key-id")
+        .filter(|value| !value.is_empty() && value.len() <= 128)
+        .ok_or_else(|| {
+            error(
+                axum::http::StatusCode::UNAUTHORIZED,
+                "invalid_marketplace_signature",
+            )
+        })?;
+    let secret = hmac_secret(key_id).ok_or_else(|| {
+        error(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "invalid_marketplace_key",
+        )
+    })?;
+    let timestamp = header("x-marketplace-timestamp")
+        .and_then(|value| value.parse::<u64>().ok())
+        .ok_or_else(|| {
+            error(
+                axum::http::StatusCode::UNAUTHORIZED,
+                "invalid_marketplace_signature",
+            )
+        })?;
+    let nonce = header("x-marketplace-nonce")
+        .filter(|value| valid_marketplace_nonce(value))
+        .ok_or_else(|| {
+            error(
+                axum::http::StatusCode::UNAUTHORIZED,
+                "invalid_marketplace_signature",
+            )
+        })?;
+    let digest = hex::encode(Sha256::digest(body));
+    if header("x-marketplace-content-sha256").map(|value| value.eq_ignore_ascii_case(&digest))
+        != Some(true)
+    {
+        return Err(error(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "invalid_marketplace_digest",
+        ));
+    }
+    let signature = header("x-marketplace-signature")
+        .and_then(|value| hex::decode(value).ok())
+        .ok_or_else(|| {
+            error(
+                axum::http::StatusCode::UNAUTHORIZED,
+                "invalid_marketplace_signature",
+            )
+        })?;
+    let now = hive_core::now_ms();
+    if now.abs_diff(timestamp) > CLOCK_SKEW_MS {
+        return Err(error(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "marketplace_request_expired",
+        ));
+    }
+    let canonical = format!("{}\n{}\n{}\n{}\n{}", method, path, timestamp, nonce, digest);
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC supports all key sizes");
+    mac.update(canonical.as_bytes());
+    mac.verify_slice(&signature).map_err(|_| {
+        error(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "invalid_marketplace_signature",
+        )
+    })?;
+    if !cloud
+        .marketplace_security
+        .consume_nonce(format!("{key_id}:{nonce}"), now)
+    {
+        return Err(error(
+            axum::http::StatusCode::CONFLICT,
+            "marketplace_nonce_replayed",
+        ));
+    }
+    crate::persist::persist(cloud);
+    Ok(())
+}
+
+/// Validate a Marketplace request while preserving its exact raw body for the
+/// downstream JSON handler. A nonce is persisted only after every header,
+/// digest, timestamp, and HMAC check succeeds (inside
+/// `verify_marketplace_request`), so malformed or unauthenticated traffic
+/// cannot consume another request's nonce.
+async fn verify_marketplace_hmac(
+    State(cloud): State<Arc<CloudState>>,
+    req: axum::extract::Request,
+    next: Next,
+) -> Response {
+    const MAX_MARKETPLACE_BODY_BYTES: usize = 64 * 1024 * 1024;
+
+    let (parts, body) = req.into_parts();
+    let method = parts.method.as_str().to_owned();
+    let path = parts.uri.path().to_owned();
+    let headers = parts.headers.clone();
+    let body = match axum::body::to_bytes(body, MAX_MARKETPLACE_BODY_BYTES).await {
+        Ok(body) => body,
+        Err(_) => {
+            return error(
+                axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+                "marketplace_request_too_large",
+            )
+            .into_response();
+        }
+    };
+    if let Err(err) = verify_marketplace_request(&cloud, &method, &path, &headers, &body) {
+        return err.into_response();
+    }
+    next.run(axum::http::Request::from_parts(parts, Body::from(body)))
+        .await
+}
+
+fn idempotency_key(headers: &HeaderMap) -> Result<String, MarketplaceError> {
+    headers
+        .get("idempotency-key")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty() && value.len() <= 128)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| {
+            error(
+                axum::http::StatusCode::BAD_REQUEST,
+                "missing_idempotency_key",
+            )
+        })
+}
+
+fn valid_marketplace_nonce(value: &str) -> bool {
+    // Marketplace's protocol calls for 32 random bytes hex-encoded. Rejecting
+    // any other shape prevents a low-entropy or ambiguously encoded replay key
+    // from reaching the durable replay store.
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn listed_deployments(cloud: &CloudState) -> Vec<ListedDeployment> {
+    let recipients = provider_registry();
+    let expires_at_ms = hive_core::now_ms() + ADVERTISEMENT_TTL_MS;
+    cloud
+        .registry
+        .nodes()
+        .into_iter()
+        .filter_map(|node| {
+            let provider_id = node.provider.clone()?.trim().to_owned();
+            let provider_recipient = recipients.get(&provider_id)?.clone();
+            let hardware = marketplace_hardware(&node);
+            eligible_node(cloud, &node).then(|| ListedDeployment {
+                deployment_id: format!(
+                    "dep_{}",
+                    &hex::encode(Sha256::digest(format!("{provider_id}:{}", node.id)))[..24]
+                ),
+                provider_id,
+                canonical_node_id: node.id,
+                provider_recipient,
+                region: node.region,
+                runtime: node.backend,
+                capabilities: Capabilities {
+                    vcpu: node.cpu_cores,
+                    ram_mib: node.mem_total_mb,
+                    gpu: Gpu {
+                        model: node.gpu_model.clone(),
+                        count: node.gpu_count,
+                    },
+                    storage_gib: node.disk_total_gb,
+                },
+                hardware,
+                expires_at_ms,
+            })
+        })
+        .collect()
+}
+
+fn marketplace_hardware(node: &hive_edge::NodeInfo) -> Option<MarketplaceHardware> {
+    let threads = bounded_positive_u32(node.cpu_cores, MAX_CPU_THREADS);
+    let physical_cores = node
+        .cpu_physical_cores
+        .filter(|count| *count > 0 && *count <= MAX_CPU_THREADS)
+        .filter(|count| threads.is_none_or(|threads| *count <= threads));
+    let model = node.cpu_model.as_deref().and_then(safe_hardware_model);
+    let architecture = node
+        .cpu_architecture
+        .as_deref()
+        .filter(|value| matches!(*value, "x86_64" | "aarch64" | "other"))
+        .map(ToOwned::to_owned);
+    let total_mib = bounded_positive_u64(node.mem_total_mb, MAX_MEMORY_MIB);
+    let gpus = node
+        .gpu_devices
+        .iter()
+        .filter_map(|gpu| {
+            let vendor = matches!(gpu.vendor.as_str(), "nvidia" | "amd" | "intel" | "other")
+                .then(|| gpu.vendor.clone())?;
+            let model = safe_hardware_model(&gpu.model)?;
+            let count = bounded_positive_u32(gpu.count, MAX_GPU_COUNT)?;
+            let vram_mib_each = bounded_positive_u64(gpu.vram_mib_each, MAX_GPU_VRAM_MIB)?;
+            Some(MarketplaceGpu {
+                vendor,
+                model,
+                count,
+                vram_mib_each,
+            })
+        })
+        .collect();
+    // Storage type/device inventory and egress minimums are deliberately
+    // absent: current DevHub telemetry only has a largest-volume aggregate and
+    // transfer counters, neither of which authoritatively supplies those facts.
+    (threads.is_some() || physical_cores.is_some() || model.is_some() || total_mib.is_some())
+        .then_some(MarketplaceHardware {
+            cpu: MarketplaceCpu {
+                model,
+                physical_cores,
+                threads,
+                architecture,
+            },
+            memory: MarketplaceMemory { total_mib },
+            gpus,
+        })
+}
+
+fn safe_hardware_model(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()
+        && value.len() <= MAX_HARDWARE_MODEL_LEN
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_graphic() || byte == b' '))
+    .then(|| value.to_owned())
+}
+
+fn bounded_positive_u32(value: u32, max: u32) -> Option<u32> {
+    (value > 0 && value <= max).then_some(value)
+}
+
+fn bounded_positive_u64(value: u64, max: u64) -> Option<u64> {
+    (value > 0 && value <= max).then_some(value)
+}
+
+async fn list_deployments(
+    State(cloud): State<Arc<CloudState>>,
+) -> ApiResult<MarketplaceDeploymentsResponse> {
+    let now = hive_core::now_ms();
+    let listed = listed_deployments(&cloud);
+    cloud
+        .marketplace_security
+        .replace_deployments(listed.clone());
+    crate::persist::persist(&cloud);
+    Ok(Json(MarketplaceDeploymentsResponse {
+        data: listed
+            .into_iter()
+            .map(|entry| MarketplaceDeployment::from_listed(entry, now))
+            .collect(),
+    }))
+}
+
+async fn create_payment_intent(
+    State(cloud): State<Arc<CloudState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Value> {
+    let key = idempotency_key(&headers)?;
+    let body_digest = hex::encode(Sha256::digest(&body));
+    if let Some(intent) = cloud
+        .marketplace_security
+        .intent_for_key(&key, &body_digest)
+        .map_err(|_| {
+            error(
+                axum::http::StatusCode::CONFLICT,
+                "payment_idempotency_conflict",
+            )
+        })?
+    {
+        return Ok(Json(payment_intent_response(&intent)));
+    }
+    let request: PaymentIntentRequest = serde_json::from_slice(&body)
+        .map_err(|_| error(axum::http::StatusCode::BAD_REQUEST, "invalid_request"))?;
+    let deployment = cloud
+        .marketplace_security
+        .deployment(&request.deployment_id)
+        .filter(|entry| entry.expires_at_ms > hive_core::now_ms())
+        .filter(|entry| {
+            entry.provider_id == request.provider_id
+                && entry.canonical_node_id == request.canonical_node_id
+        })
+        .ok_or_else(|| error(axum::http::StatusCode::CONFLICT, "deployment_unavailable"))?;
+    let buyer_address = normalized_address(&request.buyer_address)
+        .ok_or_else(|| error(axum::http::StatusCode::BAD_REQUEST, "invalid_buyer_address"))?;
+    if !valid_order_reference(&request.order_reference) {
+        return Err(error(
+            axum::http::StatusCode::BAD_REQUEST,
+            "invalid_order_reference",
+        ));
+    }
+    let gross = canonical_atomic(&request.gross_amount_atomic)
+        .ok_or_else(|| error(axum::http::StatusCode::BAD_REQUEST, "invalid_amount"))?;
+    // 500 / 10_000 is exactly 1 / 20. Decimal long division keeps the full
+    // EVM uint256 range instead of narrowing an atomic amount to u128.
+    let fee = decimal_divide_small(&gross, 20);
+    let provider_amount = decimal_subtract(&gross, &fee)
+        .expect("fee is floor(gross / 20) and can never exceed gross");
+    let settlement = settlement_config(&cloud).await?;
+    if !settlement.audited_approved
+        || !settlement.eligible_for_new_intents
+        || settlement.settlement_contract_version != SETTLEMENT_V2
+        || settlement.settlement_contract_status != SETTLEMENT_ACTIVE
+        || settlement.configuration_reference.trim().is_empty()
+    {
+        return Err(error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "settlement_unavailable",
+        ));
+    }
+    let settlement_key = derive_settlement_key(
+        &request.order_reference,
+        &settlement.token_contract,
+        &buyer_address,
+        &deployment.provider_recipient,
+        &settlement.fee_recipient,
+        &gross,
+        settlement.chain_id,
+        &settlement.settlement_contract,
+    )
+    .ok_or_else(|| {
+        error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "settlement_unavailable",
+        )
+    })?;
+    let intent = PaymentIntent {
+        payment_intent_id: format!("pi_{}", Uuid::new_v4().simple()),
+        expires_at_ms: hive_core::now_ms() + INTENT_TTL_MS,
+        order_reference: request.order_reference.to_ascii_lowercase(),
+        gross_amount_atomic: gross,
+        buyer_address,
+        deployment,
+        provider_amount_atomic: provider_amount,
+        fee_amount_atomic: fee,
+        settlement,
+        verification_status: "pending".into(),
+        transaction_hash: None,
+        settlement_key: Some(settlement_key),
+        settlement_event_log_index: None,
+    };
+    let intent = cloud
+        .marketplace_security
+        .put_intent(key, body_digest, intent)
+        .map_err(|_| {
+            error(
+                axum::http::StatusCode::CONFLICT,
+                "payment_idempotency_conflict",
+            )
+        })?;
+    crate::persist::persist(&cloud);
+    Ok(Json(payment_intent_response(&intent)))
+}
+
+fn payment_intent_response(intent: &PaymentIntent) -> Value {
+    json!({"payment_intent_id": intent.payment_intent_id,
+        "expires_at": iso_timestamp(intent.expires_at_ms),
+        "amount_atomic": intent.gross_amount_atomic, "order_reference": intent.order_reference,
+        "settlement_key": intent.settlement_key,
+        "settlement_contract": intent.settlement.settlement_contract,
+        "settlement_version": intent.settlement.settlement_contract_version,
+        "configuration_reference": intent.settlement.configuration_reference,
+        "verification_status": intent.verification_status,
+        "required_confirmations": intent.settlement.confirmation_policy.minimum_confirmations,
+        "settlement": intent.settlement})
+}
+
+async fn verify_payment(State(cloud): State<Arc<CloudState>>, body: Bytes) -> ApiResult<Value> {
+    let request: PaymentVerificationRequest = serde_json::from_slice(&body)
+        .map_err(|_| error(axum::http::StatusCode::BAD_REQUEST, "invalid_request"))?;
+    let mut intent = cloud
+        .marketplace_security
+        .intent(&request.payment_intent_id)
+        .ok_or_else(|| {
+            error(
+                axum::http::StatusCode::NOT_FOUND,
+                "payment_intent_not_found",
+            )
+        })?;
+    let transaction_hash = request.transaction_hash.to_ascii_lowercase();
+    if !valid_transaction_hash(&transaction_hash) {
+        return Err(error(
+            axum::http::StatusCode::BAD_REQUEST,
+            "invalid_transaction_hash",
+        ));
+    }
+    // Do not let a process changed to another profile settle an existing
+    // intent. Receipt validation below uses the complete immutable snapshot.
+    if intent.settlement.settlement_contract_status != SETTLEMENT_HISTORICAL
+        && settlement_config(&cloud).await?.profile != intent.settlement.profile
+    {
+        return Err(error(
+            axum::http::StatusCode::CONFLICT,
+            "settlement_profile_changed",
+        ));
+    }
+    if intent
+        .transaction_hash
+        .as_deref()
+        .is_some_and(|old| old != transaction_hash)
+    {
+        return Err(error(
+            axum::http::StatusCode::CONFLICT,
+            "payment_intent_already_bound",
+        ));
+    }
+    if intent.verification_status != "verified" {
+        intent.transaction_hash = Some(transaction_hash);
+        let (status, log_index) = verify_payment_chain(&cloud, &intent).await;
+        if status == "verified"
+            && intent.settlement.settlement_contract_version == SETTLEMENT_V2
+            && !cloud.marketplace_security.bind_verified_settlement_key(
+                &intent.payment_intent_id,
+                intent
+                    .settlement_key
+                    .as_deref()
+                    .expect("verified V2 settlement always has a key"),
+            )
+        {
+            return Err(error(
+                axum::http::StatusCode::CONFLICT,
+                "settlement_key_already_verified",
+            ));
+        }
+        intent.verification_status = status;
+        intent.settlement_event_log_index = log_index;
+        cloud.marketplace_security.update_intent(intent.clone());
+        crate::persist::persist(&cloud);
+    }
+    Ok(Json(
+        json!({"payment_intent_id": intent.payment_intent_id, "status": intent.verification_status,
+            "settlement_key": intent.settlement_key, "settlement_contract": intent.settlement.settlement_contract,
+            "settlement_version": intent.settlement.settlement_contract_version,
+            "configuration_reference": intent.settlement.configuration_reference,
+            "event_log_index": intent.settlement_event_log_index,
+            "required_confirmations": intent.settlement.confirmation_policy.minimum_confirmations}),
+    ))
+}
+
+async fn verify_payment_chain(cloud: &CloudState, intent: &PaymentIntent) -> (String, Option<u64>) {
+    if intent.expires_at_ms <= hive_core::now_ms()
+        || !valid_transaction_hash(intent.transaction_hash.as_deref().unwrap_or_default())
+    {
+        return ("failed".into(), None);
+    }
+    if !valid_settlement_snapshot(&intent.settlement) {
+        return ("failed".into(), None);
+    }
+    if intent.settlement.settlement_contract_version == SETTLEMENT_V2
+        && intent.settlement_key.as_deref()
+            != derive_settlement_key(
+                &intent.order_reference,
+                &intent.settlement.token_contract,
+                &intent.buyer_address,
+                &intent.deployment.provider_recipient,
+                &intent.settlement.fee_recipient,
+                &intent.gross_amount_atomic,
+                intent.settlement.chain_id,
+                &intent.settlement.settlement_contract,
+            )
+            .as_deref()
+    {
+        return ("failed".into(), None);
+    }
+    let chain = marketplace_rpc(cloud, &intent.settlement.rpc_url, "eth_chainId", json!([]))
+        .await
+        .and_then(|value| hex_u64(&value));
+    if chain != Some(intent.settlement.chain_id) {
+        return ("failed".into(), None);
+    }
+    let Some(receipt) = marketplace_rpc(
+        cloud,
+        &intent.settlement.rpc_url,
+        "eth_getTransactionReceipt",
+        json!([intent.transaction_hash]),
+    )
+    .await
+    else {
+        return ("pending".into(), None);
+    };
+    if receipt.is_null() {
+        return ("pending".into(), None);
+    }
+    if receipt.get("status").and_then(Value::as_str) != Some("0x1") {
+        return ("failed".into(), None);
+    }
+    let Some(block) = receipt
+        .get("blockNumber")
+        .and_then(Value::as_str)
+        .and_then(hex_u64_str)
+    else {
+        return ("failed".into(), None);
+    };
+    let Some(tip) = marketplace_rpc(
+        cloud,
+        &intent.settlement.rpc_url,
+        "eth_blockNumber",
+        json!([]),
+    )
+    .await
+    .and_then(|value| value.as_str().and_then(hex_u64_str)) else {
+        return ("pending".into(), None);
+    };
+    if tip.saturating_sub(block).saturating_add(1)
+        < intent.settlement.confirmation_policy.minimum_confirmations
+    {
+        return ("awaiting_confirmations".into(), None);
+    }
+    let matching = receipt
+        .get("logs")
+        .and_then(Value::as_array)
+        .map(|logs| {
+            logs.iter()
+                .filter_map(|log| valid_settlement_log(log, intent))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if matching.len() == 1 {
+        ("verified".into(), matching.into_iter().next())
+    } else {
+        ("failed".into(), None)
+    }
+}
+async fn marketplace_rpc(
+    cloud: &CloudState,
+    url: &str,
+    method: &str,
+    params: Value,
+) -> Option<Value> {
+    cloud
+        .http
+        .post(url)
+        .json(&json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}))
+        .send()
+        .await
+        .ok()?
+        .json::<Value>()
+        .await
+        .ok()?
+        .get("result")
+        .cloned()
+}
+
+async fn evm_code_exists(cloud: &CloudState, rpc_url: &str, address: &str) -> bool {
+    marketplace_rpc(cloud, rpc_url, "eth_getCode", json!([address, "latest"]))
+        .await
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .is_some_and(|code| {
+            code.len() > 2 && code.starts_with("0x") && code[2..].bytes().any(|byte| byte != b'0')
+        })
+}
+
+async fn evm_token_symbol(cloud: &CloudState, rpc_url: &str, address: &str) -> Option<String> {
+    // ERC-20 symbol(), decoded as the ABI dynamic string returned by THEO.
+    let result = marketplace_rpc(
+        cloud,
+        rpc_url,
+        "eth_call",
+        json!([{"to": address, "data": "0x95d89b41"}, "latest"]),
+    )
+    .await?;
+    let bytes = result.as_str().and_then(decode_hex)?;
+    let offset = abi_word_usize(&bytes, 0)?;
+    let length = abi_word_usize(&bytes, offset / 32)?;
+    let symbol = bytes.get(offset + 32..offset + 32 + length)?;
+    std::str::from_utf8(symbol).ok().map(ToOwned::to_owned)
+}
+
+fn abi_word_usize(bytes: &[u8], index: usize) -> Option<usize> {
+    let word = bytes.get(index.checked_mul(32)?..index.checked_add(1)?.checked_mul(32)?)?;
+    let mut value = 0usize;
+    for byte in word {
+        value = value.checked_mul(256)?.checked_add(*byte as usize)?;
+    }
+    Some(value)
+}
+
+fn valid_settlement_snapshot(config: &SettlementConfig) -> bool {
+    let common = config.currency == "THEO"
+        && config.token_decimals == 18
+        && config.fee_bps == FEE_BPS
+        && config.confirmation_policy.minimum_confirmations == CONFIRMATIONS
+        && normalized_address(&config.token_contract).as_deref()
+            == Some(config.token_contract.as_str())
+        && normalized_address(&config.settlement_contract).as_deref()
+            == Some(config.settlement_contract.as_str())
+        && normalized_address(&config.fee_recipient).as_deref()
+            == Some(config.fee_recipient.as_str())
+        && config.rpc_url.starts_with("https://")
+        && config.explorer_url.starts_with("https://")
+        && !config.configuration_reference.trim().is_empty();
+    common
+        && match config.profile.as_str() {
+            BASE_PROFILE => {
+                config.network == "Base Mainnet"
+                    && config.chain_id == BASE_CHAIN_ID
+                    && config.chain_id_hex == "0x2105"
+                    && config.token_contract == THEO_TOKEN
+                    && config.configuration_reference == "base-theo-atomic-split-v1"
+                    && config.settlement_event_signature == HISTORICAL_SETTLEMENT_SIGNATURE
+                    && (config.settlement_contract_version == 0
+                        || (config.settlement_contract_version == SETTLEMENT_V1
+                            && config.settlement_contract_status == SETTLEMENT_HISTORICAL))
+            }
+            AUTHEO_TESTNET_PROFILE => {
+                config.network == "Autheo Testnet"
+                    && config.chain_id == AUTHEO_TESTNET_CHAIN_ID
+                    && config.chain_id_hex == "0x311"
+                    && config.rpc_url == AUTHEO_TESTNET_RPC
+                    && config.explorer_url == AUTHEO_TESTNET_EXPLORER
+                    && ((config.settlement_contract_version == SETTLEMENT_V2
+                        && config.settlement_contract_status == SETTLEMENT_ACTIVE
+                        && config.audited_approved
+                        && config.eligible_for_new_intents
+                        && config.settlement_event_signature == SETTLEMENT_SIGNATURE)
+                        || ((config.settlement_contract_version == 0
+                            || config.settlement_contract_version == SETTLEMENT_V1)
+                            && (config.settlement_contract_status.is_empty()
+                                || config.settlement_contract_status == SETTLEMENT_HISTORICAL)
+                            && config.settlement_event_signature
+                                == HISTORICAL_SETTLEMENT_SIGNATURE))
+            }
+            _ => false,
+        }
+}
+
+fn valid_settlement_log(log: &Value, intent: &PaymentIntent) -> Option<u64> {
+    if log
+        .get("address")
+        .and_then(Value::as_str)
+        .and_then(normalized_address)
+        .as_deref()
+        != Some(intent.settlement.settlement_contract.as_str())
+    {
+        return None;
+    }
+    let expected_topic = format!(
+        "0x{}",
+        hex::encode(Keccak256::digest(
+            intent.settlement.settlement_event_signature.as_bytes()
+        ))
+    );
+    if log
+        .get("topics")
+        .and_then(Value::as_array)
+        .and_then(|topics| topics.first())
+        .and_then(Value::as_str)
+        .is_none_or(|topic| !topic.eq_ignore_ascii_case(&expected_topic))
+    {
+        return None;
+    }
+    let Some(bytes) = log.get("data").and_then(Value::as_str).and_then(decode_hex) else {
+        return None;
+    };
+    let fields_match = if intent.settlement.settlement_contract_version == SETTLEMENT_V2 {
+        if bytes.len() != 32 * 10 {
+            return None;
+        }
+        let expected_key = intent.settlement_key.as_deref()?;
+        word(&bytes, 0).as_deref() == Some(expected_key)
+            && word(&bytes, 1).as_deref() == Some(intent.order_reference.as_str())
+            && address_word(&bytes, 2).as_deref() == Some(intent.buyer_address.as_str())
+            && address_word(&bytes, 3).as_deref() == Some(intent.settlement.token_contract.as_str())
+            && address_word(&bytes, 4).as_deref()
+                == Some(intent.deployment.provider_recipient.as_str())
+            && uint_word(&bytes, 5).as_deref() == Some(intent.gross_amount_atomic.as_str())
+            && uint_word(&bytes, 6).as_deref() == Some(intent.provider_amount_atomic.as_str())
+            && address_word(&bytes, 7).as_deref() == Some(intent.settlement.fee_recipient.as_str())
+            && uint_word(&bytes, 8).as_deref() == Some(intent.fee_amount_atomic.as_str())
+            && uint_word(&bytes, 9).as_deref()
+                == Some(intent.settlement.fee_bps.to_string().as_str())
+            && fee_amount_for(&intent.gross_amount_atomic) == Some(intent.fee_amount_atomic.clone())
+            && decimal_subtract(&intent.gross_amount_atomic, &intent.fee_amount_atomic).as_deref()
+                == Some(intent.provider_amount_atomic.as_str())
+    } else {
+        // Historical V1 snapshots use their captured ABI and do not gain a
+        // synthetic V2 settlement key retroactively.
+        bytes.len() == 32 * 9
+            && word(&bytes, 0).as_deref() == Some(intent.order_reference.as_str())
+            && address_word(&bytes, 1).as_deref() == Some(intent.buyer_address.as_str())
+            && address_word(&bytes, 2).as_deref() == Some(intent.settlement.token_contract.as_str())
+            && uint_word(&bytes, 3).as_deref() == Some(intent.gross_amount_atomic.as_str())
+            && address_word(&bytes, 4).as_deref()
+                == Some(intent.deployment.provider_recipient.as_str())
+            && uint_word(&bytes, 5).as_deref() == Some(intent.provider_amount_atomic.as_str())
+            && address_word(&bytes, 6).as_deref() == Some(intent.settlement.fee_recipient.as_str())
+            && uint_word(&bytes, 7).as_deref() == Some(intent.fee_amount_atomic.as_str())
+            && uint_word(&bytes, 8).as_deref()
+                == Some(intent.settlement.fee_bps.to_string().as_str())
+            && fee_amount_for(&intent.gross_amount_atomic) == Some(intent.fee_amount_atomic.clone())
+            && decimal_subtract(&intent.gross_amount_atomic, &intent.fee_amount_atomic).as_deref()
+                == Some(intent.provider_amount_atomic.as_str())
+    };
+    fields_match
+        .then(|| {
+            log.get("logIndex")
+                .and_then(Value::as_str)
+                .and_then(hex_u64_str)
+        })
+        .flatten()
+}
+
+async fn submit_allocation(
+    State(cloud): State<Arc<CloudState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Value> {
+    let key = idempotency_key(&headers)?;
+    let body_digest = hex::encode(Sha256::digest(&body));
+    if let Some(id) = cloud
+        .marketplace_security
+        .allocation_for_key(&key, &body_digest)
+        .map_err(|_| {
+            error(
+                axum::http::StatusCode::CONFLICT,
+                "allocation_idempotency_conflict",
+            )
+        })?
+    {
+        if let Some(allocation) = cloud.marketplace_allocations.get(&id) {
+            return Ok(Json(allocation_receipt(&allocation)));
+        }
+        return Err(error(
+            axum::http::StatusCode::CONFLICT,
+            "allocation_idempotency_conflict",
+        ));
+    }
+    let request: AllocationRequest = serde_json::from_slice(&body)
+        .map_err(|_| error(axum::http::StatusCode::BAD_REQUEST, "invalid_request"))?;
+    let workload = match (&request.marketplace, &request.workload) {
+        (Some(marketplace), Some(workload)) => {
+            if marketplace.idempotency_key != key
+                || marketplace.workload_order_id.is_empty()
+                || marketplace.workload_order_id.len() > 256
+                || marketplace.buyer_tenant_id.is_empty()
+                || marketplace.buyer_tenant_id.len() > 256
+                || workload.project_id.is_empty()
+                || workload.project_id.len() > 256
+                || workload.release_id.is_empty()
+                || workload.release_id.len() > 256
+                || workload.revision.is_empty()
+                || workload.revision.len() > 256
+                || request.tenant_id != marketplace.buyer_tenant_id
+            {
+                return Err(error(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    "invalid_workload_binding",
+                ));
+            }
+            Some((marketplace, workload))
+        }
+        (None, None) => None,
+        _ => {
+            return Err(error(
+                axum::http::StatusCode::BAD_REQUEST,
+                "invalid_workload_binding",
+            ));
+        }
+    };
+    // Marketplace may advance an order only from DevHub lifecycle evidence.
+    // Refuse a workload handoff when its signed-delivery channel is not
+    // operator-configured; accepting one and silently requiring Marketplace
+    // polling would weaken that authority boundary.
+    if workload.is_some() && !lifecycle_event_delivery_configured() {
+        return Err(error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "marketplace_lifecycle_delivery_unavailable",
+        ));
+    }
+    let intent = cloud
+        .marketplace_security
+        .intent(&request.payment_intent_id)
+        .ok_or_else(|| {
+            error(
+                axum::http::StatusCode::NOT_FOUND,
+                "payment_intent_not_found",
+            )
+        })?;
+    if intent.settlement.settlement_contract_status != SETTLEMENT_HISTORICAL
+        && settlement_config(&cloud).await?.profile != intent.settlement.profile
+    {
+        return Err(error(
+            axum::http::StatusCode::CONFLICT,
+            "settlement_profile_changed",
+        ));
+    }
+    if intent.verification_status != "verified" {
+        return Err(error(
+            axum::http::StatusCode::CONFLICT,
+            "settlement_not_verified",
+        ));
+    }
+    // Immediately before scheduling, derive the current listing from the
+    // authoritative registry again; no stale listing can substitute a node.
+    let current = listed_deployments(&cloud).into_iter().find(|item| {
+        item.deployment_id == intent.deployment.deployment_id
+            && item.provider_id == intent.deployment.provider_id
+            && item.canonical_node_id == intent.deployment.canonical_node_id
+            && item.provider_recipient == intent.deployment.provider_recipient
+    });
+    let Some(current) = current else {
+        return Err(error(
+            axum::http::StatusCode::CONFLICT,
+            "deployment_unavailable",
+        ));
+    };
+    let approved = std::collections::HashSet::from([current.canonical_node_id.clone()]);
+    let regions = request.resources.region.iter().cloned().collect::<Vec<_>>();
+    if schedule::place(
+        &cloud,
+        &regions,
+        false,
+        false,
+        request.resources.gpu,
+        schedule::InterpreterNeeds::default(),
+        false,
+        false,
+        Some(&approved),
+    )
+    .is_empty()
+    {
+        return Err(error(
+            axum::http::StatusCode::CONFLICT,
+            "capacity_unavailable",
+        ));
+    }
+    let now = hive_core::now_ms();
+    let allocation_id = format!("alloc_{}", Uuid::new_v4().simple());
+    let (workload_order_id, workload_handoff_id) = if let Some((marketplace, workload)) = workload {
+        // Marketplace does not get to prove ownership by naming a project.
+        // The project store is DevHub authority and its tenant must match the
+        // paid allocation's buyer exactly.
+        if cloud.projects.team_of(&workload.project_id) != marketplace.buyer_tenant_id {
+            return Err(error(
+                axum::http::StatusCode::FORBIDDEN,
+                "marketplace_buyer_mismatch",
+            ));
+        }
+        let release = cloud
+            .marketplace_releases
+            .release(&workload.release_id)
+            .ok_or_else(|| {
+                error(
+                    axum::http::StatusCode::CONFLICT,
+                    "marketplace_release_unavailable",
+                )
+            })?;
+        if !release.published
+            || release.revoked
+            || release.project_id != workload.project_id
+            || release.revision != workload.revision
+        {
+            return Err(error(
+                axum::http::StatusCode::CONFLICT,
+                "marketplace_release_mismatch",
+            ));
+        }
+        let handoff_id = format!("wh_{}", Uuid::new_v4().simple());
+        cloud
+            .marketplace_releases
+            .attach_from_marketplace(
+                handoff_id.clone(),
+                allocation_id.clone(),
+                workload.project_id.clone(),
+                release.release_id,
+                release.revision,
+                marketplace.buyer_tenant_id.clone(),
+            )
+            .map_err(|code| error(axum::http::StatusCode::CONFLICT, code))?;
+        (
+            Some(marketplace.workload_order_id.clone()),
+            Some(handoff_id),
+        )
+    } else {
+        (None, None)
+    };
+    let allocation = Allocation {
+        allocation_id: allocation_id.clone(),
+        marketplace_order_id: intent.order_reference.clone(),
+        tenant_id: request.tenant_id.clone(),
+        resources: request.resources.clone(),
+        approved_node_ids: vec![current.canonical_node_id],
+        theo_amount: intent.gross_amount_atomic.clone(),
+        expires_at_ms: intent.expires_at_ms,
+        contract_reference: intent.payment_intent_id.clone(),
+        advertisement_id: intent.deployment.deployment_id.clone(),
+        status: if workload_handoff_id.is_some() {
+            "scheduled".into()
+        } else {
+            "submitted".into()
+        },
+        routed_build_id: None,
+        created_at_ms: now,
+        updated_at_ms: now,
+        settlement_key: intent.settlement_key.clone(),
+        configuration_reference: Some(intent.settlement.configuration_reference.clone()),
+        workload_order_id,
+        workload_handoff_id,
+    };
+    let allocation = match cloud.marketplace_allocations.put_if_absent(allocation) {
+        Ok(row) => row,
+        Err(old) => {
+            return Ok(Json(allocation_receipt(&old)));
+        }
+    };
+    cloud
+        .marketplace_security
+        .bind_allocation_key(key, body_digest, allocation.allocation_id.clone())
+        .map_err(|_| {
+            error(
+                axum::http::StatusCode::CONFLICT,
+                "allocation_idempotency_conflict",
+            )
+        })?;
+    if let Some(workload_order_id) = allocation.workload_order_id.clone() {
+        cloud
+            .marketplace_releases
+            .queue_lifecycle_event(MarketplaceLifecycleEvent {
+                event_id: format!("evt_{}", Uuid::new_v4().simple()),
+                event_version: 1,
+                workload_order_id,
+                buyer_tenant_id: allocation.tenant_id.clone(),
+                allocation_id: allocation.allocation_id.clone(),
+                lifecycle_status: allocation.status.clone(),
+                occurred_at: iso_millis_timestamp(now),
+                reason_code: "allocation_accepted".into(),
+                delivered: false,
+            });
+    }
+    crate::persist::persist(&cloud);
+    // HMAC routes authorize settlement and capacity only.  They must never
+    // accept repository/image/build settings from Marketplace.  A separately
+    // authenticated DevHub route attaches a durable, immutable project release
+    // after exact buyer/project/revision validation.
+    Ok(Json(allocation_receipt(&allocation)))
+}
+
+/// Accept durable commercial workload intent only after DevHub resolves the
+/// exact immutable executable binding. This endpoint intentionally does not
+/// schedule, allocate storage, start a server, or promote a standby: those
+/// capabilities require artifact storage, persistent state, replication, and
+/// fencing that are not available in the current execution plane.
+async fn submit_workload_intent(
+    State(cloud): State<Arc<CloudState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Value> {
+    let header_key = idempotency_key(&headers)?;
+    let request: WorkloadIntentRequest = serde_json::from_slice(&body).map_err(|_| {
+        error(
+            axum::http::StatusCode::BAD_REQUEST,
+            "invalid_workload_intent",
+        )
+    })?;
+    if request.idempotency_key != header_key
+        || !valid_workload_identifier(&request.workload_order_id)
+        || !valid_workload_identifier(&request.buyer_tenant_id)
+        || !valid_workload_identifier(&request.project_id)
+        || !valid_workload_identifier(&request.release_id)
+        || !valid_workload_identifier(&request.revision)
+        || !valid_term(&request.term)
+        || request.capacity_requirements.vcpu == 0
+        || request.capacity_requirements.vcpu > MAX_WORKLOAD_VCPU
+        || request.capacity_requirements.memory_mib == 0
+        || request.capacity_requirements.memory_mib > MAX_WORKLOAD_MEMORY_MIB
+        || request.capacity_requirements.storage_gib == 0
+        || request.capacity_requirements.storage_gib > MAX_WORKLOAD_STORAGE_GIB
+        || request.continuity_policy.recovery_point_objective_seconds
+            > MAX_CONTINUITY_OBJECTIVE_SECONDS
+        || request.continuity_policy.recovery_time_objective_seconds
+            > MAX_CONTINUITY_OBJECTIVE_SECONDS
+    {
+        return Err(error(
+            axum::http::StatusCode::BAD_REQUEST,
+            "invalid_workload_intent",
+        ));
+    }
+    if request.continuity_policy.mode != "none" {
+        // No persistent volume, snapshot/restore, replication, reservation, or
+        // fencing authority exists yet. Accepting even warm standby would
+        // falsely promise state continuity; automatic failover is prohibited.
+        return Err(error(
+            axum::http::StatusCode::CONFLICT,
+            "workload_continuity_unsupported",
+        ));
+    }
+    if cloud.projects.team_of(&request.project_id) != request.buyer_tenant_id {
+        return Err(error(
+            axum::http::StatusCode::FORBIDDEN,
+            "marketplace_buyer_mismatch",
+        ));
+    }
+    let binding = cloud
+        .marketplace_releases
+        .executable_binding(&request.project_id, &request.release_id, &request.revision)
+        .ok_or_else(|| {
+            error(
+                axum::http::StatusCode::CONFLICT,
+                "release_executable_artifact_unavailable",
+            )
+        })?;
+    let instance = cloud
+        .marketplace_releases
+        .accept_workload_instance(DevHubWorkloadInstance {
+            workload_instance_id: format!("wi_{}", Uuid::new_v4().simple()),
+            workload_order_id: request.workload_order_id.clone(),
+            buyer_tenant_id: request.buyer_tenant_id.clone(),
+            marketplace_idempotency_key: request.idempotency_key,
+            term_starts_at: request.term.starts_at,
+            term_ends_at: request.term.ends_at,
+            requested_vcpu: request.capacity_requirements.vcpu,
+            requested_memory_mib: request.capacity_requirements.memory_mib,
+            requested_storage_gib: request.capacity_requirements.storage_gib,
+            project_id: request.project_id,
+            release_id: request.release_id,
+            revision: request.revision,
+            artifact_digest: binding.artifact.digest,
+            runtime_spec_digest: binding.runtime_spec_digest,
+            lifecycle_state: String::new(),
+            current_primary_allocation: None,
+            persistent_storage_id: None,
+            storage_node: None,
+            storage_persistent: true,
+            storage_snapshot: false,
+            storage_portable_restore: false,
+            storage_replication: false,
+            storage_multi_node_attach: false,
+            runtime_container_id: None,
+            runtime_process_started: false,
+            runtime_healthy: false,
+            tcp_ready: false,
+            minecraft_application_ready: false,
+            workload_ready: false,
+            failure_reason: None,
+            continuity_policy: request.continuity_policy.mode,
+            created_ms: hive_core::now_ms(),
+        })
+        .map_err(|code| error(axum::http::StatusCode::CONFLICT, code))?;
+    cloud
+        .marketplace_releases
+        .queue_lifecycle_event(MarketplaceLifecycleEvent {
+            event_id: format!("evt_{}", Uuid::new_v4().simple()),
+            event_version: 1,
+            workload_order_id: instance.workload_order_id.clone(),
+            buyer_tenant_id: instance.buyer_tenant_id.clone(),
+            allocation_id: instance.workload_instance_id.clone(),
+            lifecycle_status: "workload_accepted".into(),
+            occurred_at: iso_millis_timestamp(instance.created_ms),
+            reason_code: "immutable_executable_binding_resolved".into(),
+            delivered: false,
+        });
+    crate::persist::persist(&cloud);
+    Ok(Json(json!({
+        "workload_instance_id": instance.workload_instance_id,
+        "status": instance.lifecycle_state,
+    })))
+}
+
+/// Validate the versioned, outcome-based request shape without granting
+/// placement. This is intentionally a fail-closed integration boundary:
+/// signed request authentication proves the caller is Marketplace, but it
+/// cannot prove that a referenced commercial policy, provider qualification,
+/// stake observation, buyer network membership, or revocation state remains
+/// current. DevHub must obtain those facts from a separate trusted authority.
+async fn validate_workload_intent_v2(
+    State(cloud): State<Arc<CloudState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Value> {
+    let header_key = idempotency_key(&headers)?;
+    let request: WorkloadIntentV2Request = serde_json::from_slice(&body).map_err(|_| {
+        error(
+            axum::http::StatusCode::BAD_REQUEST,
+            "invalid_workload_intent_v2",
+        )
+    })?;
+    if request.contract_version != "marketplace-workload-v2"
+        || request.idempotency_key != header_key
+        || !valid_workload_identifier(&request.workload_order_id)
+        || !valid_workload_identifier(&request.buyer_tenant_id)
+        || !valid_workload_identifier(&request.project_id)
+        || !valid_workload_identifier(&request.release_id)
+        || !valid_workload_identifier(&request.revision)
+        || !valid_workload_identifier(&request.commercial_authorization_ref)
+        || !valid_workload_spec_v2(&request.workload)
+        || !valid_workload_policy_v2(&request.policy)
+        || !valid_commercial_authorization_v2(&request.commercial_authorization)
+        || !valid_term(&request.commercial_term)
+        || request.continuity_policy.mode != "none"
+        || request.continuity_policy.recovery_point_objective_seconds
+            > MAX_CONTINUITY_OBJECTIVE_SECONDS
+        || request.continuity_policy.recovery_time_objective_seconds
+            > MAX_CONTINUITY_OBJECTIVE_SECONDS
+        || !valid_placement_v2(
+            &request.placement,
+            request.preferred_network_authorization.as_ref(),
+        )
+    {
+        return Err(error(
+            axum::http::StatusCode::BAD_REQUEST,
+            "invalid_workload_intent_v2",
+        ));
+    }
+    if cloud.projects.team_of(&request.project_id) != request.buyer_tenant_id {
+        return Err(error(
+            axum::http::StatusCode::FORBIDDEN,
+            "marketplace_buyer_mismatch",
+        ));
+    }
+    // Do not queue, reserve, attach, or launch anything here.  Phase 4G
+    // inspected the existing stores and found no quorum-confirmed conditional
+    // write / transaction primitive.  The replicated control plane's wholesale
+    // snapshots and GuardianDB's local-first CRDT replication cannot safely
+    // implement compare-and-reserve across concurrent nodes.  A configured
+    // authorization client would not repair that missing capacity authority.
+    Err(error(
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        AUTHORITY_UNAVAILABLE_REASON,
+    ))
+}
+
+fn valid_workload_spec_v2(workload: &WorkloadSpecV2) -> bool {
+    workload.template == "minecraft"
+        && valid_workload_identifier(&workload.workload_class)
+        && workload.capacity_requirements.vcpu > 0
+        && workload.capacity_requirements.vcpu <= MAX_WORKLOAD_VCPU
+        && workload.capacity_requirements.memory_mib > 0
+        && workload.capacity_requirements.memory_mib <= MAX_WORKLOAD_MEMORY_MIB
+        && workload.capacity_requirements.storage_gib > 0
+        && workload.capacity_requirements.storage_gib <= MAX_WORKLOAD_STORAGE_GIB
+}
+
+fn valid_workload_policy_v2(policy: &WorkloadPolicyV2) -> bool {
+    valid_workload_identifier(&policy.scheduling_policy_version)
+        && valid_workload_identifier(&policy.commercial_policy_version)
+}
+
+fn valid_commercial_authorization_v2(authorization: &CommercialAuthorizationV2) -> bool {
+    valid_workload_identifier(&authorization.issuer)
+        && valid_workload_identifier(&authorization.authorization_id)
+        && valid_workload_identifier(&authorization.policy_version)
+        && valid_term(&CommercialTerm {
+            starts_at: authorization.issued_at.clone(),
+            ends_at: authorization.expires_at.clone(),
+        })
+}
+
+fn valid_placement_v2(
+    placement: &WorkloadPlacementV2,
+    network: Option<&PreferredNetworkAuthorizationV2>,
+) -> bool {
+    match placement.mode.as_str() {
+        "standard" => network.is_none(),
+        "preferred_network" => network.is_some_and(|authorization| {
+            valid_workload_identifier(&authorization.network_id)
+                && valid_workload_identifier(&authorization.membership_revision)
+                && valid_workload_identifier(&authorization.issuer)
+                && valid_workload_identifier(&authorization.authorization_id)
+                && valid_term(&CommercialTerm {
+                    starts_at: authorization.issued_at.clone(),
+                    ends_at: authorization.expires_at.clone(),
+                })
+        }),
+        _ => false,
+    }
+}
+
+fn valid_workload_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 256
+        && !value.contains('\0')
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_graphic() || byte == b' ')
+}
+
+fn valid_term(term: &CommercialTerm) -> bool {
+    if term.starts_at.len() > 64 || term.ends_at.len() > 64 {
+        return false;
+    }
+    let Ok(starts_at) = chrono::DateTime::parse_from_rfc3339(&term.starts_at) else {
+        return false;
+    };
+    let Ok(ends_at) = chrono::DateTime::parse_from_rfc3339(&term.ends_at) else {
+        return false;
+    };
+    starts_at < ends_at
+}
+
+/// Deliver Marketplace lifecycle evidence without making an allocation request
+/// wait on an external callback. Delivery is opt-in through operator-owned
+/// configuration; an unset callback leaves events durable and pending rather
+/// than inventing a polling-based state transition.
+pub fn spawn_lifecycle_delivery(cloud: Arc<CloudState>) {
+    tokio::spawn(async move {
+        loop {
+            for event in cloud.marketplace_releases.pending_lifecycle_events() {
+                if deliver_lifecycle_event(&cloud, &event).await {
+                    cloud
+                        .marketplace_releases
+                        .mark_lifecycle_delivered(&event.event_id);
+                    crate::persist::persist(&cloud);
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
+    });
+}
+
+async fn deliver_lifecycle_event(cloud: &CloudState, event: &MarketplaceLifecycleEvent) -> bool {
+    let Ok(url) = std::env::var("HIVE_MARKETPLACE_EVENT_URL") else {
+        return false;
+    };
+    let Ok(parsed) = reqwest::Url::parse(&url) else {
+        return false;
+    };
+    if parsed.scheme() != "https" || parsed.host_str().is_none() {
+        return false;
+    }
+    let Ok(key_id) = std::env::var("HIVE_MARKETPLACE_EVENT_KEY_ID") else {
+        return false;
+    };
+    let Some(secret) = devhub_event_secret(&key_id) else {
+        return false;
+    };
+    let Ok(body) = serde_json::to_vec(&json!({
+        "event_id": event.event_id,
+        "event_version": event.event_version,
+        "workload_order_id": event.workload_order_id,
+        "buyer_tenant_id": event.buyer_tenant_id,
+        "allocation_id": event.allocation_id,
+        "lifecycle_status": event.lifecycle_status,
+        "occurred_at": event.occurred_at,
+        "reason_code": event.reason_code,
+    })) else {
+        return false;
+    };
+    let timestamp = hive_core::now_ms();
+    let nonce = Uuid::new_v4().simple().to_string();
+    let path = parsed.path();
+    let digest = hex::encode(Sha256::digest(&body));
+    // Marketplace's callback verifier includes the DevHub key id in the
+    // signed canonical input. Its omission would let a signed body be
+    // rebound to another accepted key id during rotation.
+    let canonical = format!("POST\n{path}\n{timestamp}\n{nonce}\n{key_id}\n{digest}");
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC supports all key sizes");
+    mac.update(canonical.as_bytes());
+    let signature = hex::encode(mac.finalize().into_bytes());
+    cloud
+        .http
+        .post(url)
+        .header("content-type", "application/json")
+        .header("x-devhub-key-id", key_id)
+        .header("x-devhub-timestamp", timestamp)
+        .header("x-devhub-nonce", nonce)
+        .header("x-devhub-content-sha256", digest)
+        .header("x-devhub-signature", signature)
+        .body(body)
+        .send()
+        .await
+        .is_ok_and(|response| response.status().is_success())
+}
+
+fn lifecycle_event_delivery_configured() -> bool {
+    let Ok(url) = std::env::var("HIVE_MARKETPLACE_EVENT_URL") else {
+        return false;
+    };
+    let Ok(parsed) = reqwest::Url::parse(&url) else {
+        return false;
+    };
+    if parsed.scheme() != "https" || parsed.host_str().is_none() {
+        return false;
+    }
+    std::env::var("HIVE_MARKETPLACE_EVENT_KEY_ID")
+        .ok()
+        .filter(|key_id| !key_id.is_empty())
+        .and_then(|key_id| devhub_event_secret(&key_id))
+        .is_some()
+}
+
+/// Marketplace receives an opaque acknowledgement only. In particular, never
+/// add the approved node, settlement identity, project source, release source,
+/// credential selector, connection data, or topology to this projection.
+fn allocation_receipt(allocation: &Allocation) -> Value {
+    json!({
+        "allocation_id": allocation.allocation_id,
+        "workload_handoff_id": allocation.workload_handoff_id,
+        "status": allocation.status,
+    })
+}
+
+fn eligible_node(cloud: &CloudState, node: &hive_edge::NodeInfo) -> bool {
+    let connected = node.name == cloud.node_name
+        || cloud.node_admins.read().contains_key(&node.name)
+        || (node.peer_id.is_some() && node.iroh_addr.is_some());
+    node.healthy
+        && connected
+        && (node.backend == "firecracker"
+            || (node.backend == "litebox" && schedule::runtime_artifact_capable(node, true)))
+        && node.mem_total_mb >= 1024
+        && (node.disk_free_gb == 0 || node.disk_free_gb >= 20)
+}
+fn valid_order_reference(value: &str) -> bool {
+    value.len() == 66
+        && value.starts_with("0x")
+        && value[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+fn iso_timestamp(timestamp_ms: u64) -> String {
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp_ms as i64)
+        .map(|timestamp| timestamp.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        .unwrap_or_default()
+}
+fn iso_millis_timestamp(timestamp_ms: u64) -> String {
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp_ms as i64)
+        .map(|timestamp| timestamp.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+        .unwrap_or_default()
+}
+fn valid_transaction_hash(value: &str) -> bool {
+    valid_order_reference(value)
+}
+fn hex_u64(value: &Value) -> Option<u64> {
+    value.as_str().and_then(hex_u64_str)
+}
+fn hex_u64_str(value: &str) -> Option<u64> {
+    u64::from_str_radix(value.strip_prefix("0x")?, 16).ok()
+}
+fn decode_hex(value: &str) -> Option<Vec<u8>> {
+    hex::decode(value.strip_prefix("0x")?).ok()
+}
+fn word(bytes: &[u8], index: usize) -> Option<String> {
+    bytes
+        .get(index * 32..(index + 1) * 32)
+        .map(|word| format!("0x{}", hex::encode(word)))
+}
+/// Solidity-compatible `keccak256(abi.encode(...))` for the V2 settlement
+/// replay identity. Every parameter here is static, so ABI encoding is ten
+/// left-padded 32-byte words; it is deliberately not `abi.encodePacked`.
+fn derive_settlement_key(
+    order_reference: &str,
+    token: &str,
+    payer: &str,
+    provider_recipient: &str,
+    fee_recipient: &str,
+    gross_amount: &str,
+    chain_id: u64,
+    settlement_contract: &str,
+) -> Option<String> {
+    let mut encoded = Vec::with_capacity(32 * 8);
+    encoded.extend(decode_hex(order_reference).filter(|value| value.len() == 32)?);
+    encoded.extend(address_abi_word(token)?);
+    encoded.extend(address_abi_word(payer)?);
+    encoded.extend(address_abi_word(provider_recipient)?);
+    encoded.extend(address_abi_word(fee_recipient)?);
+    encoded.extend(uint256_abi_word(gross_amount)?);
+    encoded.extend(uint256_abi_word(&chain_id.to_string())?);
+    encoded.extend(address_abi_word(settlement_contract)?);
+    Some(format!("0x{}", hex::encode(Keccak256::digest(encoded))))
+}
+fn address_abi_word(address: &str) -> Option<[u8; 32]> {
+    let address = normalized_address(address)?;
+    let raw = decode_hex(&address)?;
+    let mut word = [0u8; 32];
+    word[12..].copy_from_slice(&raw);
+    Some(word)
+}
+fn uint256_abi_word(value: &str) -> Option<[u8; 32]> {
+    let value = canonical_atomic(value)?;
+    let mut word = [0u8; 32];
+    for digit in value.bytes() {
+        let mut carry = (digit - b'0') as u16;
+        for byte in word.iter_mut().rev() {
+            let product = (*byte as u16) * 10 + carry;
+            *byte = product as u8;
+            carry = product >> 8;
+        }
+        if carry != 0 {
+            return None;
+        }
+    }
+    Some(word)
+}
+fn address_word(bytes: &[u8], index: usize) -> Option<String> {
+    bytes
+        .get(index * 32 + 12..(index + 1) * 32)
+        .map(|word| format!("0x{}", hex::encode(word)))
+}
+fn uint_word(bytes: &[u8], index: usize) -> Option<String> {
+    let word = bytes.get(index * 32..(index + 1) * 32)?;
+    // uint256 to decimal, without a lossy host-integer conversion.
+    let mut digits = vec![0u8];
+    for byte in word {
+        let mut carry = *byte as u16;
+        for digit in &mut digits {
+            let value = (*digit as u16) * 256 + carry;
+            *digit = (value % 10) as u8;
+            carry = value / 10;
+        }
+        while carry > 0 {
+            digits.push((carry % 10) as u8);
+            carry /= 10;
+        }
+    }
+    Some(
+        digits
+            .into_iter()
+            .rev()
+            .map(|digit| (b'0' + digit) as char)
+            .collect(),
+    )
+}
+fn canonical_atomic(value: &str) -> Option<String> {
+    const MAX_UINT256: &str =
+        "115792089237316195423570985008687907853269984665640564039457584007913129639935";
+    (!value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| value.trim_start_matches('0').to_owned())
+        .filter(|value| {
+            !value.is_empty()
+                && (value.len() < MAX_UINT256.len()
+                    || (value.len() == MAX_UINT256.len() && value.as_str() <= MAX_UINT256))
+        })
+}
+fn decimal_divide_small(value: &str, divisor: u8) -> String {
+    let mut remainder = 0u16;
+    let mut output = String::new();
+    for byte in value.bytes() {
+        let quotient = (remainder * 10 + (byte - b'0') as u16) / divisor as u16;
+        remainder = (remainder * 10 + (byte - b'0') as u16) % divisor as u16;
+        if !output.is_empty() || quotient != 0 {
+            output.push((b'0' + quotient as u8) as char);
+        }
+    }
+    if output.is_empty() {
+        "0".into()
+    } else {
+        output
+    }
+}
+fn fee_amount_for(gross: &str) -> Option<String> {
+    // Kept in terms of the policy constant so a future policy cannot silently
+    // leave arithmetic tied to this currently exact 1/20 reduction.
+    (FEE_BPS == 500).then(|| decimal_divide_small(gross, 20))
+}
+fn decimal_subtract(value: &str, subtrahend: &str) -> Option<String> {
+    let mut result = Vec::with_capacity(value.len());
+    let mut borrow = 0i16;
+    let mut left = value.bytes().rev();
+    let mut right = subtrahend.bytes().rev();
+    loop {
+        let Some(a) = left.next() else { break };
+        let b = right.next().map(|byte| (byte - b'0') as i16).unwrap_or(0);
+        let mut digit = (a - b'0') as i16 - b - borrow;
+        borrow = if digit < 0 {
+            digit += 10;
+            1
+        } else {
+            0
+        };
+        result.push((b'0' + digit as u8) as char);
+    }
+    (borrow == 0).then(|| {
+        let output: String = result.into_iter().rev().collect();
+        let output = output.trim_start_matches('0');
+        if output.is_empty() {
+            "0".into()
+        } else {
+            output.to_owned()
+        }
+    })
+}

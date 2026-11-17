@@ -517,7 +517,7 @@ fn lookup(
                     return (rrs, Vec::new(), true, tailored);
                 }
                 16 if qname.starts_with("_acme-challenge.") => {
-                    return (acme_txt_rrs(cloud, qname), Vec::new(), true, false)
+                    return (acme_txt_rrs(cloud, qname), Vec::new(), true, false);
                 }
                 _ => return (Vec::new(), Vec::new(), true, false),
             }
@@ -791,12 +791,6 @@ fn apex_ns_names(cloud: &Arc<CloudState>, require_api: bool) -> Vec<String> {
     names
 }
 
-/// Public handle for the admin roster endpoint (the wizard shows tenants the
-/// exact hostnames to delegate to; private so the filter stays in one place).
-pub fn apex_ns_names_pub(cloud: &Arc<CloudState>) -> Vec<String> {
-    apex_ns_names(cloud, false)
-}
-
 fn apex_ns_rrs(cloud: &Arc<CloudState>, require_api: bool) -> Vec<(u16, u32, Vec<u8>)> {
     apex_ns_names(cloud, require_api)
         .into_iter()
@@ -907,6 +901,7 @@ mod tests {
             musql_engine: None,
             gpu_model: None,
             gpu_vram_mb: 0,
+            gpu_devices: Vec::new(),
             id: name.into(),
             name: name.into(),
             region: "test".into(),
@@ -931,6 +926,9 @@ mod tests {
             city: None,
             country: None,
             cpu_cores: 0,
+            cpu_model: None,
+            cpu_physical_cores: None,
+            cpu_architecture: None,
             mem_total_mb: 0,
             disk_total_gb: 0,
             // 0/None = UNKNOWN, which is correct for these fixtures: DNS

@@ -1,32 +1,51 @@
-import Image from "next/image";
-
-/** The shadw wordmark: black on light, white on dark, toggled with CSS (`dark:`) so there is no hydration flash. Size it with a height utility; `w-auto` keeps the ~3:1 ratio and `max-w-none` stops Tailwind's `img { max-width: 100% }` preflight from capping the width while the height stays fixed in a squeezed flex row. */
 export function Logo({ className = "h-6 w-auto" }: { className?: string }) {
   return (
-    <span className="inline-flex shrink-0 items-center" aria-label="shadw">
-      <Image src="/shadw-logo-light.png" alt="shadw" width={274} height={91} className={`${className} block max-w-none dark:hidden`} />
-      <Image src="/shadw-logo-dark.png" alt="shadw" width={274} height={91} className={`${className} hidden max-w-none dark:block`} />
+    <span
+      className={`inline-flex items-center font-display font-bold tracking-tight text-fg ${className}`}
+      aria-label="autheo.dev"
+      style={{ lineHeight: 1 }}
+    >
+      autheo<span className="text-green">.dev</span>
     </span>
   );
 }
 
-/** The navbar brand mark, a Δ vector path in `currentColor`: it inverts with the theme with no image swap or hydration flash. */
-export function VercelMark({ className = "h-5 w-auto" }: { className?: string }) {
+// The navbar brand mark: a Δ (Greek capital delta). Theme-aware via
+// `currentColor` (`text-fg` is black on light backgrounds, white on dark), so
+// it inverts with the theme with no image swap or hydration flash. Kept as a
+// vector path rather than a text glyph so it renders identically across
+// platform fonts and sizes cleanly with a height utility (e.g. `h-5`).
+export function LightningMark({ className = "h-5 w-auto" }: { className?: string }) {
   return (
-    <svg viewBox="0 0 76 65" className={`${className} text-fg`} fill="currentColor" aria-label="Delta" role="img">
+    <svg viewBox="0 0 32 32" className={`${className} text-green`} fill="none" aria-label="Autheo DevHub" role="img">
       <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M38 0 76 65H0L38 0Zm0 13.6L12.9 56.6H63.1L38 13.6Z"
+        d="M16 2 29 26h-6.8l-1.8-3.9h-8.7L10 26H3L16 2Z"
+        fill="currentColor"
+      />
+      <path
+        d="m15.9 10.2-2.9 6.1h5.8l-2.9-6.1Z"
+        fill="hsl(var(--background))"
       />
     </svg>
   );
 }
 
-/** Fixed-theme variants for surfaces that are always one theme (the always-dark landing page uses <LogoWhite/>). */
+/** @deprecated Use LightningMark, the Autheo DevHub brand mark. */
+export const VercelMark = LightningMark;
+
+// Forced-color variants for surfaces that are always one theme (e.g. the
+// always-dark landing page uses <LogoWhite/>).
 export function LogoWhite({ className = "h-6 w-auto" }: { className?: string }) {
-  return <Image src="/shadw-logo-dark.png" alt="shadw" width={274} height={91} className={className} />;
+  return (
+    <span className={`inline-flex items-center font-display font-bold tracking-tight text-white ${className}`} aria-label="autheo.dev" style={{ lineHeight: 1 }}>
+      autheo<span className="text-emerald-300">.dev</span>
+    </span>
+  );
 }
 export function LogoBlack({ className = "h-6 w-auto" }: { className?: string }) {
-  return <Image src="/shadw-logo-light.png" alt="shadw" width={274} height={91} className={className} />;
+  return (
+    <span className={`inline-flex items-center font-display font-bold tracking-tight text-black ${className}`} aria-label="autheo.dev" style={{ lineHeight: 1 }}>
+      autheo<span className="text-emerald-700">.dev</span>
+    </span>
+  );
 }

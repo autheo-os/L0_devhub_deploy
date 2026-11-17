@@ -22,9 +22,9 @@ import {
 
 export const metadata: Metadata = pageMeta({
   title: "Features",
-  socialTitle: "Features — shadw",
+  socialTitle: "Features — autheo",
   description:
-    "Explore shadw's platform: Git deploys, immutable builds, rollback to earlier deployments, preview URLs, custom domains & DNS, secrets, serverless functions, containers, managed databases, cron & workflows, logs and metrics, and experimental ZK preview access.",
+    "Explore autheo's platform: Git deploys, immutable builds, rollback to earlier deployments, preview URLs, custom domains & DNS, secrets, serverless functions, containers, managed databases, cron & workflows, logs and metrics, and experimental ZK preview access.",
   twitterDescription:
     "Git deploys, immutable builds, rollback, previews, custom domains, secrets, serverless functions, containers, managed databases, cron, and logs and metrics.",
   path: "/features",
@@ -150,7 +150,7 @@ export default function FeaturesPage() {
           <div>
             <h2 className="text-3xl font-bold tracking-tight text-white">Deploy with a git push</h2>
             <p className="mt-3 text-zinc-400">
-              Connect a repository and push. shadw detects supported frameworks, builds an immutable deployment,
+              Connect a repository and push. autheo detects supported frameworks, builds an immutable deployment,
               and serves it — no servers to provision.
             </p>
             <ul className="mt-6 space-y-3">
@@ -188,7 +188,7 @@ export default function FeaturesPage() {
 
       <MarketingSection className="py-16">
         <GlowCard className="text-center">
-          <h2 className="text-3xl font-bold tracking-tight text-white">Ship on shadw today</h2>
+          <h2 className="text-3xl font-bold tracking-tight text-white">Ship on autheo today</h2>
           <p className="mx-auto mt-3 max-w-xl text-zinc-400">
             Get the deploy experience you love on a cloud you can self-host. The hosted service uses Clerk,
             Stripe and Vercel DNS.

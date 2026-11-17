@@ -13,22 +13,22 @@ const TABS = [
   {
     label: "CLI",
     short: "CLI",
-    raw: "# Authenticate once with an API key\n$ shadw auth login --token <your-api-key>\n\n# Deploy a repository and follow the build\n$ shadw deploy https://github.com/you/my-app \\\n    --project my-app --follow\n\n# Re-attach to a build's logs, or rebuild a project\n$ shadw build logs dpl-3f9a21c07b --follow\n$ shadw projects redeploy my-app",
+    raw: "# Authenticate once with an API key\n$ shadw auth login --token <your-api-key>\n\n# Deploy a repository and follow the build\n$ shadw deploy https://github.com/you/my-app \\\n    --project my-app --follow\n\n# Re-attach to a build's logs, or rebuild a project\n$ shadw build logs dpl-3f9a21c07b --follow\n$ autheo projects redeploy my-app",
   },
   {
     label: "cURL",
     short: "cURL",
-    raw: `# Auth: an API key (hive_…) binds the request to its team.\ncurl -X POST https://api.shadw.cloud/v1/git/deploy \\\n  -H 'content-type: application/json' \\\n  -H 'Authorization: Bearer hive_YOUR_API_KEY' \\\n  -d '{\n    "repo_url": "https://github.com/acme/app",\n    "project": "my-app",\n    "production": true\n  }'`,
+    raw: `# Auth: an API key (hive_…) binds the request to its team.\ncurl -X POST https://api.autheo.dev/v1/git/deploy \\\n  -H 'content-type: application/json' \\\n  -H 'Authorization: Bearer hive_YOUR_API_KEY' \\\n  -d '{\n    "repo_url": "https://github.com/acme/app",\n    "project": "my-app",\n    "production": true\n  }'`,
   },
   {
     label: "TypeScript",
     short: "TS",
-    raw: `const res = await fetch("https://api.shadw.cloud/v1/git/deploy", {\n  method: "POST",\n  headers: {\n    "content-type": "application/json",\n    Authorization: \`Bearer \${process.env.HIVE_API_KEY}\`,\n  },\n  body: JSON.stringify({\n    repo_url: "https://github.com/acme/app",\n    project: "my-app",\n    production: true,\n  }),\n});\nconst { build_id } = await res.json();`,
+    raw: `const res = await fetch("https://api.autheo.dev/v1/git/deploy", {\n  method: "POST",\n  headers: {\n    "content-type": "application/json",\n    Authorization: \`Bearer \${process.env.HIVE_API_KEY}\`,\n  },\n  body: JSON.stringify({\n    repo_url: "https://github.com/acme/app",\n    project: "my-app",\n    production: true,\n  }),\n});\nconst { build_id } = await res.json();`,
   },
   {
     label: "Python",
     short: "PY",
-    raw: `import os\nimport requests\n\nres = requests.post(\n    "https://api.shadw.cloud/v1/git/deploy",\n    headers={"Authorization": f"Bearer {os.environ['HIVE_API_KEY']}"},\n    json={\n        "repo_url": "https://github.com/acme/app",\n        "project": "my-app",\n        "production": True,\n    },\n)\nbuild_id = res.json()["build_id"]`,
+    raw: `import os\nimport requests\n\nres = requests.post(\n    "https://api.autheo.dev/v1/git/deploy",\n    headers={"Authorization": f"Bearer {os.environ['HIVE_API_KEY']}"},\n    json={\n        "repo_url": "https://github.com/acme/app",\n        "project": "my-app",\n        "production": True,\n    },\n)\nbuild_id = res.json()["build_id"]`,
   },
 ];
 const MAX_LINES = Math.max(...TABS.map((t) => t.raw.split("\n").length));

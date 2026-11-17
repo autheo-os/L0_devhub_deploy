@@ -1,4 +1,4 @@
-/** The shadw REST API catalog, the single source of truth for the API Reference docs (sidebar tree, Endpoints overview grid and every generated per-method page); it mirrors the
+/** The autheo REST API catalog, the single source of truth for the API Reference docs (sidebar tree, Endpoints overview grid and every generated per-method page); it mirrors the
  *  node admin API (crates/hive-cloud). */
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -33,7 +33,7 @@ export interface ApiCategory {
 }
 
 /** Public base URL documented for the API. */
-export const API_BASE = "https://api.shadw.cloud";
+export const API_BASE = "https://api.autheo.dev";
 
 export const API_CATEGORIES: ApiCategory[] = [
   {
@@ -239,7 +239,7 @@ export const API_CATEGORIES: ApiCategory[] = [
     "created_ms": 1781906630000,
     "expires_ms": 0,
     "nameservers": ["ns1.shadw.cloud", "ns2.shadw.cloud"],
-    "ssl": { "id": "", "cns": [], "renewal": "pending", "issued_ms": 0, "expires_ms": 0, "provider": "OpenEdge (Let's Encrypt)" },
+    "ssl": { "id": "", "cns": [], "renewal": "pending", "issued_ms": 0, "expires_ms": 0, "provider": "DevHub (Let's Encrypt)" },
     "records": [
       { "id": "rec_3f9c2db1e77a41b0", "name": "", "type": "CAA", "value": "0 issue \\"letsencrypt.org\\"", "ttl": 60, "priority": null, "comment": "Managed SSL issuer", "created_ms": 1781906630000, "system": true }
     ]
@@ -252,7 +252,7 @@ export const API_CATEGORIES: ApiCategory[] = [
         name: "Set nameservers",
         method: "PUT",
         path: "/v1/domains/{domain}/nameservers",
-        summary: "Set the domain's nameservers (when delegating the whole zone to shadw). Returns the full domain record.",
+        summary: "Set the domain's nameservers (when delegating the whole zone to autheo). Returns the full domain record.",
         pathParams: [{ name: "domain", type: "string", required: true, desc: "The domain name." }],
         bodyParams: [{ name: "nameservers", type: "string[]", required: true, desc: "Nameservers to delegate the zone to." }],
         response: `{
@@ -265,7 +265,7 @@ export const API_CATEGORIES: ApiCategory[] = [
   "created_ms": 1781906630000,
   "expires_ms": 0,
   "nameservers": ["ns1.shadw.cloud", "ns2.shadw.cloud"],
-  "ssl": { "id": "", "cns": [], "renewal": "pending", "issued_ms": 0, "expires_ms": 0, "provider": "OpenEdge (Let's Encrypt)" },
+  "ssl": { "id": "", "cns": [], "renewal": "pending", "issued_ms": 0, "expires_ms": 0, "provider": "DevHub (Let's Encrypt)" },
   "records": [
     { "id": "rec_3f9c2db1e77a41b0", "name": "", "type": "CAA", "value": "0 issue \\"letsencrypt.org\\"", "ttl": 60, "priority": null, "comment": "Managed SSL issuer", "created_ms": 1781906630000, "system": true }
   ]
@@ -278,7 +278,7 @@ export const API_CATEGORIES: ApiCategory[] = [
         path: "/v1/domains/{domain}/ssl/renew",
         summary: "Request reissue of the domain's free managed Let's Encrypt certificate. Issuance runs in the background; the response is the domain's current certificate block (renewal is pending until a certificate is installed, then auto).",
         pathParams: [{ name: "domain", type: "string", required: true, desc: "The domain name." }],
-        response: `{ "id": "", "cns": [], "renewal": "pending", "issued_ms": 0, "expires_ms": 0, "provider": "OpenEdge (Let's Encrypt)" }`,
+        response: `{ "id": "", "cns": [], "renewal": "pending", "issued_ms": 0, "expires_ms": 0, "provider": "DevHub (Let's Encrypt)" }`,
       },
     ],
   },
@@ -291,7 +291,7 @@ export const API_CATEGORIES: ApiCategory[] = [
         name: "Create a DNS record",
         method: "POST",
         path: "/v1/domains/{domain}/records",
-        summary: "Create a DNS record. shadw's authoritative DNS server answers queries for the domain from these records.",
+        summary: "Create a DNS record. autheo's authoritative DNS server answers queries for the domain from these records.",
         pathParams: [{ name: "domain", type: "string", required: true, desc: "The domain name." }],
         bodyParams: [
           { name: "type", type: '"A" | "AAAA" | "CNAME" | "TXT" | "MX" | "NS"', required: true, desc: "Record type." },

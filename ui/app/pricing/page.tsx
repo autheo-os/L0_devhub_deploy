@@ -3,14 +3,15 @@ import type { Metadata } from "next";
 import { darkViewport, pageMeta } from "@/lib/page-meta";
 import { MarketingShell, MarketingHero, MarketingSection, GlowCard } from "@/components/marketing-shell";
 import { Check } from "lucide-react";
+import { TheoMarketReference } from "@/components/theo-market-reference";
 
 export const metadata: Metadata = pageMeta({
   title: "Pricing",
-  socialTitle: "Pricing — shadw",
+  socialTitle: "Pricing — autheo",
   description:
-    "shadw pricing plans: Hobby is free ($0), Pro is $20/month, Business is $200/month, Enterprise is $1,000/month and Enterprise Plus is $5,000/month. Compare tiers and read answers to common pricing questions.",
+    "autheo pricing plans: Hobby is free (0 THEO), Pro is 20 THEO/month, Business is 200 THEO/month, Enterprise is 1,000 THEO/month and Enterprise Plus is 5,000 THEO/month. Compare tiers and read answers to common pricing questions.",
   twitterDescription:
-    "shadw pricing: Hobby $0, Pro $20/month, Business $200/month, Enterprise $1,000/month, Enterprise Plus $5,000/month. Compare tiers and read pricing FAQs.",
+    "autheo pricing: Hobby 0 THEO, Pro 20 THEO/month, Business 200 THEO/month, Enterprise 1,000 THEO/month, Enterprise Plus 5,000 THEO/month. Compare tiers and read pricing FAQs.",
   path: "/pricing",
 });
 export const viewport = darkViewport;
@@ -33,14 +34,14 @@ type Tier = {
 const TIERS: Tier[] = [
   {
     name: "Hobby",
-    price: "$0",
+    price: "0 THEO",
     period: "/ forever",
     tagline: "For personal projects and experiments.",
     features: [
       "20 projects",
       "1 concurrent build",
       "Community support",
-      "$5 of included compute / month",
+      "5 THEO of included compute / month",
       "Preview deployments",
       "Automatic HTTPS",
       "Custom domains & DNS",
@@ -53,14 +54,14 @@ const TIERS: Tier[] = [
   },
   {
     name: "Pro",
-    price: "$20",
+    price: "20 THEO",
     period: "/month",
     tagline: "For growing teams shipping to production.",
     features: [
       "Everything in Hobby",
       "200 projects",
       "Unlimited concurrent builds",
-      "$20 of included compute / month",
+      "20 THEO of included compute / month",
       "Pay-as-you-go beyond included compute",
       "Up to 25 team members",
       "Deployment protection and microfrontends",
@@ -74,14 +75,14 @@ const TIERS: Tier[] = [
   },
   {
     name: "Business",
-    price: "$200",
+    price: "200 THEO",
     period: "/month",
     tagline: "For scaling teams.",
     features: [
       "Everything in Pro",
       "800 projects",
       "Unlimited concurrent builds",
-      "$200 of included compute / month",
+      "200 THEO of included compute / month",
       "Pay-as-you-go beyond included compute",
       "Up to 100 team members",
       "Deployment protection and microfrontends",
@@ -94,14 +95,14 @@ const TIERS: Tier[] = [
   },
   {
     name: "Enterprise",
-    price: "$1,000",
+    price: "1,000 THEO",
     period: "/month",
     tagline: "For organizations with large compute needs.",
     features: [
       "Everything in Business",
       "10,000 projects",
       "10,000,000 workflow steps / day",
-      "$1,000 of included compute / month",
+      "1,000 THEO of included compute / month",
       "Multi-region fail-over",
       "SAML SSO, SCIM and SIEM audit-log streaming",
       "IP blocking",
@@ -115,7 +116,7 @@ const TIERS: Tier[] = [
   },
   {
     name: "Enterprise Plus",
-    price: "$5,000",
+    price: "5,000 THEO",
     period: "/month",
     tagline: "For the largest deployments.",
     features: [
@@ -124,7 +125,7 @@ const TIERS: Tier[] = [
       "Unlimited workflow steps / day",
       "Unlimited team members",
       "Unlimited sandboxes",
-      "$5,000 of included compute / month",
+      "5,000 THEO of included compute / month",
       "Multi-region fail-over",
       "SAML SSO, SCIM and SIEM audit-log streaming",
       "IP blocking",
@@ -140,7 +141,7 @@ const TIERS: Tier[] = [
 const FAQS: { q: string; a: string }[] = [
   {
     q: "Can I self-host?",
-    a: "Yes. shadw can run on nodes you operate. Self-hosting is not a plan feature: Hobby, Pro, Business, Enterprise and Enterprise Plus differ in included compute, limits and support.",
+    a: "Yes. autheo can run on nodes you operate. Self-hosting is not a plan feature: Hobby, Pro, Business, Enterprise and Enterprise Plus differ in included compute, limits and support.",
   },
   {
     q: "What counts as a build?",
@@ -148,7 +149,7 @@ const FAQS: { q: string; a: string }[] = [
   },
   {
     q: "Do you offer a free tier?",
-    a: "Yes. The Hobby plan costs $0 and includes $5 of compute per month, preview deployments and automatic HTTPS. It has no pay-as-you-go overage: once the $5 is used and you have no prepaid credits, new deployments are blocked until the next monthly period, unless you add credits or upgrade to Pro.",
+    a: "Yes. The Hobby plan costs 0 THEO and includes 5 THEO of compute per month, preview deployments and automatic HTTPS. It has no pay-as-you-go overage: once the 5 THEO is used and you have no prepaid credits, new deployments are blocked until the next monthly period, unless you add credits or upgrade to Pro.",
   },
   {
     q: "Can I bring my own domain?",
@@ -156,7 +157,7 @@ const FAQS: { q: string; a: string }[] = [
   },
   {
     q: "How are workflow steps counted?",
-    a: "A workflow step is one step of a workflow run. Each plan caps the steps it will run per UTC day: 1,000 on Hobby, 100,000 on Pro, 1,000,000 on Business, 10,000,000 on Enterprise and unlimited on Enterprise Plus. Steps are metered at $1 per 100,000 steps on the usage rate card.",
+    a: "A workflow step is one step of a workflow run. Each plan caps the steps it will run per UTC day: 1,000 on Hobby, 100,000 on Pro, 1,000,000 on Business, 10,000,000 on Enterprise and unlimited on Enterprise Plus. Steps are metered at 1 THEO per 100,000 steps on the usage rate card.",
   },
 ];
 
@@ -183,6 +184,7 @@ export default function PricingPage() {
       />
 
       <MarketingSection className="pb-20">
+        <div className="mb-6"><TheoMarketReference /></div>
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {TIERS.map((tier) => (
             <div
@@ -229,7 +231,7 @@ export default function PricingPage() {
           ))}
         </div>
         <p className="mx-auto mt-10 max-w-2xl text-center text-sm text-zinc-500">
-          Workflow steps: $1 per 100,000 steps on the metered rate card; each plan caps the steps it runs per day.
+          Workflow steps: 1 THEO per 100,000 steps on the metered rate card; each plan caps the steps it runs per day.
         </p>
       </MarketingSection>
 

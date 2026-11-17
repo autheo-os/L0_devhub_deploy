@@ -1,11 +1,25 @@
 "use client";
 
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Logo } from "@/components/logo";
 
 export function Footer() {
+  return (
+    <Suspense fallback={null}>
+      <FooterContent />
+    </Suspense>
+  );
+}
+
+function FooterContent() {
   const pathname = usePathname();
+  const [year, setYear] = useState<number | null>(null);
+  useEffect(() => {
+    setYear(new Date().getFullYear());
+  }, []);
+
   if (pathname.startsWith("/admin") || pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up") || pathname.startsWith("/status") || pathname.startsWith("/docs")) return null;
 
   return (
@@ -15,7 +29,7 @@ export function Footer() {
           <Logo className="h-4 w-auto max-w-none sm:h-5" />
         </Link>
         <div className="flex min-w-0 items-center gap-4">
-          <span>© {new Date().getFullYear()} shadw</span>
+          <span>© {year ?? ""} Autheo DevHub</span>
           <Link href="/status" className="hover:text-fg">Status</Link>
           <Link href="/privacy" className="hover:text-fg">Privacy</Link>
         </div>

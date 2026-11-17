@@ -6,9 +6,9 @@ import { MarketingShell, MarketingHero, MarketingSection, GlowCard } from "@/com
 
 export const metadata: Metadata = pageMeta({
   title: "Contact",
-  socialTitle: "Contact — shadw",
+  socialTitle: "Contact — autheo",
   description:
-    "Get in touch with shadw about self-hosting, pricing, or migrating your cloud. Reach sales, support, or enterprise by email.",
+    "Get in touch with autheo about self-hosting, pricing, or migrating your cloud. Reach sales, support, or enterprise by email.",
   path: "/contact",
 });
 export const viewport = darkViewport;
@@ -29,9 +29,9 @@ export default function ContactPage() {
 
       <MarketingSection className="grid gap-6 py-16 md:grid-cols-3">
         {[
-          { icon: MessageSquare, title: "Sales", desc: "Talk through your use case and self-hosting plan.", cta: "sales@shadw.cloud" },
-          { icon: Mail, title: "Support", desc: "Email support from Pro; priority support on Enterprise tiers. Hobby has community support.", cta: "support@shadw.cloud" },
-          { icon: Building2, title: "Enterprise", desc: "Multi-region fail-over, SAML SSO and priority support.", cta: "enterprise@shadw.cloud" },
+          { icon: MessageSquare, title: "Sales", desc: "Talk through your use case and self-hosting plan.", cta: "sales@autheo.dev" },
+          { icon: Mail, title: "Support", desc: "Email support from Pro; priority support on Enterprise tiers. Hobby has community support.", cta: "support@autheo.dev" },
+          { icon: Building2, title: "Enterprise", desc: "Multi-region fail-over, SAML SSO and priority support.", cta: "enterprise@autheo.dev" },
         ].map((c) => (
           <GlowCard key={c.title}>
             <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/5">

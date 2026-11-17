@@ -871,7 +871,7 @@ const US_SMS_GATEWAYS: &[&str] = &[
 /// replies cannot hang the whole blast. A domain with no MX answers an error; there is no
 /// implicit-MX fallback to its address record.
 async fn smtp_deliver_one(to: &str, from: &str, text: &str) -> Result<(), String> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncWriteExt;
     let domain = to
         .split('@')
         .nth(1)

@@ -28,7 +28,7 @@ export async function generateMetadata(props: { params: Promise<{ category: stri
   const description = `${ep.method} ${ep.path}: ${ep.summary}`;
   return pageMeta({
     title: `${ep.name} — API Reference`,
-    socialTitle: `${ep.name} — shadw API Reference`,
+    socialTitle: `${ep.name} — autheo API Reference`,
     description: description.length > 158 ? `${description.slice(0, 155).trimEnd()}...` : description,
     path: endpointHref(category, method),
   });
@@ -76,7 +76,7 @@ export default async function MethodPage(props: { params: Promise<{ category: st
         <div className="mb-6 flex flex-wrap items-center gap-2 text-sm text-secondary">
           <span>APIs &amp; SDKs</span>
           <span className="text-muted">/</span>
-          <Link href="/docs/api-reference" className="tap-44 inline-flex items-center hover:text-fg">shadw REST API</Link>
+          <Link href="/docs/api-reference" className="tap-44 inline-flex items-center hover:text-fg">autheo REST API</Link>
           <span className="text-muted">/</span>
           <span className="font-medium text-fg">{ep.name}</span>
         </div>

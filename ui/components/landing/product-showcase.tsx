@@ -2,7 +2,7 @@ import Image from "next/image";
 import { Section, SectionHead } from "./section";
 import { delay } from "./lp-utils";
 
-/** Real screens: the dashboard's own `/` and a project's Deployments tab, captured at 2x (2880 x 1800) from a local shadw node whose projects were built by
+/** Real screens: the dashboard's own `/` and a project's Deployments tab, captured at 2x (2880 x 1800) from a local autheo node whose projects were built by
  *  real deploys (no DOM edits). The only change to a frame is the hidden footer copyright; recapture whenever the dashboard changes. */
 const NAT = { w: 2880, h: 1800 };
 type Box = { x: number; y: number; w: number; h: number };
@@ -27,7 +27,7 @@ function Crop({ src, alt, box, sizes, className = "" }: { src: string; alt: stri
 
 const PROJECTS = "/product/dashboard-projects.png";
 const DEPLOYMENTS = "/product/dashboard-deployments.png";
-const PROJECTS_ALT = "The shadw dashboard on a local machine with four sample projects, storefront, marketing-site, docs and status, each deployed, with recent previews and usage beside them.";
+const PROJECTS_ALT = "The autheo dashboard on a local machine with four sample projects, storefront, marketing-site, docs and status, each deployed, with recent previews and usage beside them.";
 
 export function ProductShowcase() {
   return (

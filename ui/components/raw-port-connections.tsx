@@ -47,11 +47,24 @@ export function RawPortConnections({ deployment, alias }: { deployment: Deployme
   const bindings = deployment?.raw_ports;
   if (!bindings || bindings.length === 0) return null;
   const effectiveAlias = alias ?? deployment?.alias;
+  if (deployment?.state !== "ready" || !effectiveAlias) {
+    return (
+      <p role="status" className="text-xs text-secondary">
+        Connection details will appear after the deployment passes its readiness checks.
+      </p>
+    );
+  }
+  const isMinecraftJava = bindings.some(binding => binding.protocol === "tcp" && binding.container_port === 25565);
   return (
     <div className="flex flex-col gap-1.5">
       {bindings.map((b) => (
         <RawPortRow key={`${b.function}-${b.container_port}-${b.protocol}`} binding={b} alias={effectiveAlias} regionCode={deployment?.region_code} />
       ))}
+      {isMinecraftJava && effectiveAlias ? (
+        <p className="mt-1 text-xs text-secondary">
+          In Minecraft Java, open Multiplayer, choose Add Server, and paste the copied address into Server Address.
+        </p>
+      ) : null}
     </div>
   );
 }

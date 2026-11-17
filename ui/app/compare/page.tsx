@@ -10,9 +10,9 @@ import "@/components/landing/landing.css";
 
 export const metadata: Metadata = pageMeta({
   title: "Compare",
-  socialTitle: "Compare shadw with Vercel, Railway, Fly.io and Cloudflare",
+  socialTitle: "Compare autheo with Vercel, Railway, Fly.io and Cloudflare",
   description:
-    "See how shadw compares with Vercel, Railway, Fly.io and Cloudflare: Git deploys, previews, managed data and the choice to run on your own machines, with sources linked on every page.",
+    "See how autheo compares with Vercel, Railway, Fly.io and Cloudflare: Git deploys, previews, managed data and the choice to run on your own machines, with sources linked on every page.",
   twitterDescription:
     "Git deploys, previews, managed data and the choice to self-host. Four comparisons, with sources.",
   path: "/compare",
@@ -46,7 +46,7 @@ export default function CompareIndex() {
         <div className="grid gap-5 md:grid-cols-2">
           {COMPARISONS.map((c) => (
             <GlowCard key={c.slug}>
-              <p className="lp-eyebrow lp-mono">shadw vs.</p>
+              <p className="lp-eyebrow lp-mono">autheo vs.</p>
               <h3 className="lp-card-title mt-3 !text-2xl font-semibold text-white"><Tok>{c.rival}</Tok></h3>
               <p className="lp-card-copy mt-3 min-h-[72px]">{c.summary}</p>
               <Link

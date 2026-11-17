@@ -4,14 +4,14 @@ import { COMPARE_LINKS } from "@/lib/compare-links";
 
 const ALL_LINKS = [
   { label: "All comparisons", href: "/compare", slug: "" },
-  ...COMPARE_LINKS.map((c) => ({ label: `shadw vs ${c.rival}`, href: `/compare/${c.slug}`, slug: c.slug })),
+  ...COMPARE_LINKS.map((c) => ({ label: `autheo vs ${c.rival}`, href: `/compare/${c.slug}`, slug: c.slug })),
 ];
 
 export function CompareNav({ active }: { active: string }) {
   return (
     <nav aria-label="Comparisons" className="border-b border-white/10">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-6 py-4">
-        <span className="lp-mono mr-1 text-[12px] uppercase tracking-[0.18em] text-zinc-400">shadw vs.</span>
+        <span className="lp-mono mr-1 text-[12px] uppercase tracking-[0.18em] text-zinc-400">autheo vs.</span>
         {ALL_LINKS.map((l) => {
           const isActive = l.slug === active;
           return (

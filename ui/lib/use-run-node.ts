@@ -18,7 +18,7 @@ const DEFAULT_RELAYS = [
   "https://fc-bangkok.relay.shadw.app:3343",
   "https://fc-virginia.relay.shadw.app:3343",
 ].join(",");
-const RELAY = process.env.NEXT_PUBLIC_HIVE_BROWSER_RELAY || DEFAULT_RELAYS;
+const RELAY = (typeof process !== "undefined" && process.env.NEXT_PUBLIC_HIVE_BROWSER_RELAY) || DEFAULT_RELAYS;
 
 /** Page half of the browser↔browser direct lane: `RTCPeerConnection` is Window-only, so the
  *  run-node worker brokers a peer connection through a connected page (`meshPeerRequest` →

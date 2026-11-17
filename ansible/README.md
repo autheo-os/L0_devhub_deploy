@@ -32,8 +32,12 @@ cp inventory/group_vars/vault.yml.example inventory/group_vars/all/vault.yml
 # edit vault.yml: real HIVE_JWT_SECRET / HIVE_INTERNAL_TOKEN / VERCEL_API_TOKEN
 ansible-vault encrypt inventory/group_vars/all/vault.yml
 
-echo 'your-vault-password' > .vault_pass   # gitignored; ansible.cfg points at this
-chmod 600 .vault_pass
+# Store the new-fleet password outside this checkout. The checked-in
+# ansible.cfg uses each operator's ~/.config/autheo/ansible/vault_pass.
+vault_config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+install -d -m 0700 "$vault_config_home/autheo/ansible"
+printf '%s\n' 'your-new-fleet-vault-password' > "$vault_config_home/autheo/ansible/vault_pass"
+chmod 600 "$vault_config_home/autheo/ansible/vault_pass"
 ```
 
 Every HIVE_* value with a sane default lives in
@@ -139,6 +143,65 @@ adding or re-imaging a node).
 failure class) -- every task in this playbook reuses one multiplexed
 connection per host rather than opening a fresh one per task/module call.
 
+### Primary Autheo Development Hub (:3001)
+
+The primary Autheo Development Hub is **not** the fleet dashboard. It is
+`autheo-devhub.service`, runs from `/opt/autheo-devhub`, and listens only on
+`127.0.0.1:3001`. The existing `hive-ui.service` remains the independently
+deployed fleet dashboard on `127.0.0.1:3002`.
+
+The Dev Hub deploy is opt-in and runs on the existing `ui_builder` host (the
+control-plane owner elected by `parallel-deploy.yml`), never by a hard-coded
+host name. The wrapper archives the requested revision from its local checkout
+and transfers it to the elected host, so the host does not need GitHub access.
+The role can still clone the requested source/ref when invoked directly without
+an archive. It uses the
+application's `ui/package-lock.json` via `npm ci`, runs the production build,
+validates `.next/BUILD_ID` and the Next runtime, then atomically replaces
+`/opt/autheo-devhub`. `/etc/autheo-devhub.env` is never copied into the
+artifact or overwritten; an empty root-only file is created only if it is
+missing. A failed build cannot modify the running release, and a failed
+post-publication health check attempts to restore the retained previous
+release.
+
+One-command redeploy from the repository root (the wrapper asks for
+confirmation; `--yes` is suitable for an intentional non-interactive run):
+
+```bash
+ansible/scripts/deploy-autheo-devhub.sh --yes
+```
+
+The wrapper first decrypts the existing Ansible vault, verifies
+`roles/autheo_devhub/tasks/main.yml`, and runs only:
+
+```bash
+ansible-playbook -i inventory/hosts.ini playbooks/parallel-deploy.yml \
+  --tags autheo_devhub \
+  -e autheo_devhub_enabled=true \
+  -e autheo_devhub_repo=https://github.com/ThothDivision/L0_devhub_deploy.git \
+  -e autheo_devhub_version=main \
+  -e autheo_devhub_source_archive=/tmp/autheo-devhub-source.tar.gz \
+  -e autheo_devhub_source_revision=<immutable-git-revision>
+```
+
+Use `--inventory`, `--repo`, `--version`, `--source-dir`, `--limit`, or
+`--vault-password-file` for explicit safe overrides. `--update` is opt-in
+and performs only a clean fast-forward update of this checkout; it refuses
+any unclean or diverged working tree rather than merging, rebasing, or
+resetting it.
+
+The wrapper accepts success only after the role reports
+`AUTHEO DEV HUB VERIFIED (:3001)`. That result confirms the installed source
+revision and `BUILD_ID` match the build made in that run, systemd is active and
+actually restarted for a published release, and
+`http://127.0.0.1:3001/` returns a successful status. Verify manually with:
+
+```bash
+systemctl status autheo-devhub
+cat /opt/autheo-devhub/.autheo-devhub-release
+curl http://127.0.0.1:3001/
+```
+
 ## Add one new node (day 2)
 
 ```bash
@@ -186,7 +249,7 @@ live in fleet presence: `roles/hive_browser_node/README.md`.
 ## Secrets
 
 Never commit real secrets. `inventory/hosts.ini`, `inventory/group_vars/
-all/vault.yml`, and `.vault_pass` are all gitignored -- only the `.example`
+all/vault.yml`, and local vault-password files are all gitignored -- only the `.example`
 templates ship in git. `vault.yml` lives inside `group_vars/all/` (not as a
 flat `group_vars/all.yml`-style file) because ansible's group_vars loader
 does NOT merge a flat `group_vars/<group>.yml` with a same-named
@@ -203,6 +266,42 @@ the `all/` directory specifically so both actually load. Secrets referenced in r
 `vault_github_token`, `vault_hive_secret_key`)
 resolve from the encrypted `vault.yml`.
 
+### Vault preflight and recovery
+
+Before a deployment, verify only that the encrypted vault can be opened; do
+not print its plaintext:
+
+```bash
+cd ansible
+vault_pass="${XDG_CONFIG_HOME:-$HOME/.config}/autheo/ansible/vault_pass"
+ANSIBLE_CONFIG="$PWD/ansible.cfg" ansible-vault view \
+  --vault-password-file "$vault_pass" \
+  inventory/group_vars/all/vault.yml >/dev/null
+```
+
+The configured password source is each operator's
+`~/.config/autheo/ansible/vault_pass`; the redeploy wrapper honors
+`XDG_CONFIG_HOME` when choosing its default, and `--vault-password-file` can
+select a different existing source. A missing vault file is different from a
+missing password file: restore the encrypted vault from the approved operator
+backup and the exact pre-existing password from the approved secret manager or
+a prior authorized control host. Preserve their contents;
+do **not** make a replacement from `vault.yml.example`, re-encrypt the vault,
+or invent a password. Ensure the recovered password file is readable only by
+its owner (`0600`) and parent directory is private (`0700`).
+
+If both files exist but this preflight fails, the password is wrong or stale.
+This repository's `$ANSIBLE_VAULT;1.1;AES256` header has no vault ID, so a
+vault-ID mismatch is not applicable to this file. Obtain the matching
+pre-existing password through the approved secret-recovery process, then
+repeat the preflight. Do not bypass vault protection with an empty inventory,
+placeholder secrets, or a replacement vault.
+
+The explicit `ANSIBLE_CONFIG` is required for WSL checkouts under
+`/mnt/c/...`: Ansible deliberately ignores an automatically discovered
+`ansible.cfg` from a world-writable directory. The redeploy wrapper sets this
+variable for both its vault preflight and its playbook run.
+
 ## Roles
 
 | Role | Does |
@@ -214,6 +313,7 @@ resolve from the encrypted `vault.yml`.
 | `hive_ui` | builds + installs the `ui/` dashboard (Next.js) and its systemd unit -- used by `site.yml`'s from-scratch path |
 | `hive_platform_fanout` | build/push/restart task files backing `parallel-deploy.yml`'s backend phases (one build per glibc group, parallel push, bounded-serial restart) |
 | `hive_ui_fanout` | build/push/restart task files backing `parallel-deploy.yml`'s UI phases (one canonical build, parallel push, bounded-serial restart) |
+| `autheo_devhub` | opt-in atomic primary Dev Hub deployment on the elected UI/control-plane host (`autheo-devhub.service`, loopback `:3001`); distinct from `hive-ui` (`:3002`) |
 | `mesh_bootstrap` | mesh trust config (join-proof self-admit by default, or the opt-in static `HIVE_TRUSTED_NODE_IDS` allowlist) |
 | `dns_vercel` | DNS/TLS ingress systemd drop-in (Vercel DNS + ACME DNS-01), matching `RUNBOOK.md` |
 | `hive_browser_node` | one capped headless browser node per host on the five `[browser_nodes]` hosts: headless Chromium + a loopback session broker that mints the short-lived tenant JWT the admission requires (see its own README for the auth decision and every cap value) |

@@ -1080,6 +1080,10 @@ export interface ProjectSettings {
   /** Dashboard-managed container config (resource ceilings + volume mount path) for the `container` runtime; port and
    *  protocol are a live edit on the Network settings page instead. */
   container?: ContainerSettings | null;
+  /** Dashboard-managed game-server config (Drive mods sync + version pins +
+   *  world-save snapshots). Absent/null = not configured. Applies on the
+   *  next deploy — see the Game settings page. */
+  game?: GameServerSettings | null;
   /** The project's purchased dedicated IPv4 (the purchase record: stays set across redeploys, and may be set while
    *  `Deployment.dedicated_ipv4` is still absent, meaning purchased and awaiting the next deploy). */
   dedicated_ipv4?: DedicatedIpv4 | null;
@@ -1096,6 +1100,31 @@ export interface ContainerSettings {
   volume_mount_path?: string | null;
 }
 
+/** See `ProjectSettings.game`. Mirrors
+ *  `hive_cloud::project_settings::GameServerSettings` field-for-field. */
+export interface GameServerSettings {
+  /** Drive folder holding this server's mod/plugin files, e.g. "/mods".
+   *  Empty/null = no Drive sync. */
+  mods_drive_path?: string | null;
+  /** Directory inside the persistent volume the files land in (default
+   *  "mods" — "plugins" for a Bukkit-style server). */
+  mods_dest_subdir?: string | null;
+  /** Game version pin, e.g. "1.21.4" — stamped as the `VERSION` env var on
+   *  the container when the image/compose file did not already set one. */
+  game_version?: string | null;
+  /** Server type/flavor, e.g. "PAPER"/"FORGE"/"FABRIC" — stamped as the
+   *  `TYPE` env var with the same never-override rule. */
+  server_type?: string | null;
+  /** Snapshot the world dir of the persistent volume before each deploy
+   *  (rollback point per build, kept inside the volume). */
+  world_snapshot_on_deploy?: boolean;
+  /** World directory inside the volume that gets snapshotted (default
+   *  "world"). */
+  world_subdir?: string | null;
+}
+
+// ---- Browser-replicated database (browser_db contract) ----
+// Mirrors `fluid_core::BrowserDbPolicy` verbatim — presence is the opt-in.
 export interface BrowserDbTable {
   /** `[A-Za-z_][A-Za-z0-9_]*` — validated both here and server-side. */
   name: string;
@@ -1883,7 +1912,6 @@ export interface BillingAccount {
   included_cents: number;
   used_cents: number;
   balance_cents: number;
-  stripe_customer: string;
   period_start_ms: number;
   period_end_ms: number;
   updated_ms: number;
@@ -1891,7 +1919,6 @@ export interface BillingAccount {
 export interface BillingInfo {
   account: BillingAccount;
   plans: PlanSpec[];
-  stripe: boolean;
   rate_card?: RateCard;
   limits?: PlanLimits;
   current_invoice?: Invoice;

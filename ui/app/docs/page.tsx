@@ -6,11 +6,11 @@ import { CodeBlock } from "@/components/code-block";
 
 export const metadata: Metadata = pageMeta({
   title: "Documentation",
-  socialTitle: "Documentation — shadw",
+  socialTitle: "Documentation — autheo",
   description:
-    "shadw documentation: deploy serverless functions, containers, and static sites from Git, hosted or on machines you operate, with guides for environment & secrets, GitOps, regions, and the REST API.",
+    "autheo documentation: deploy serverless functions, containers, and static sites from Git, hosted or on machines you operate, with guides for environment & secrets, GitOps, regions, and the REST API.",
   twitterDescription:
-    "shadw documentation: deploy serverless functions, containers, and static sites from Git, with guides for GitOps, regions, and the REST API.",
+    "autheo documentation: deploy serverless functions, containers, and static sites from Git, with guides for GitOps, regions, and the REST API.",
   path: "/docs",
 });
 
@@ -21,7 +21,7 @@ const HERO_TABS = [
     filename: "deploy.sh",
     code: `# Auth: an API key (hive_…) binds the request to its team.
 # Local dev (no HIVE_JWT_SECRET): 'x-hive-team: personal' works too.
-curl -X POST https://api.shadw.cloud/v1/git/deploy \\
+curl -X POST https://api.autheo.dev/v1/git/deploy \\
   -H 'content-type: application/json' \\
   -H 'Authorization: Bearer hive_YOUR_API_KEY' \\
   -d '{
@@ -34,7 +34,7 @@ curl -X POST https://api.shadw.cloud/v1/git/deploy \\
     label: "TypeScript",
     lang: "ts" as const,
     filename: "deploy.ts",
-    code: `const res = await fetch("https://api.shadw.cloud/v1/git/deploy", {
+    code: `const res = await fetch("https://api.autheo.dev/v1/git/deploy", {
   method: "POST",
   headers: {
     "content-type": "application/json",
@@ -57,7 +57,7 @@ const { build_id } = await res.json();`,
 import requests
 
 res = requests.post(
-    "https://api.shadw.cloud/v1/git/deploy",
+    "https://api.autheo.dev/v1/git/deploy",
     # API key (Settings → API Keys) — binds the request to its team.
     headers={"Authorization": f"Bearer {os.environ['HIVE_API_KEY']}"},
     json={
@@ -112,7 +112,7 @@ export default function DocsIndex() {
         for testing changes before production.
       </p>
 
-      <h2 className="mb-5 mt-12 text-2xl font-semibold tracking-tight">Build with shadw</h2>
+      <h2 className="mb-5 mt-12 text-2xl font-semibold tracking-tight">Build with autheo</h2>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {CARDS.map((c) => (
           <Link
@@ -130,7 +130,7 @@ export default function DocsIndex() {
         ))}
       </div>
 
-      <footer className="mt-16 border-t border-border pt-6 text-sm text-muted">© 2026 shadw.cloud</footer>
+      <footer className="mt-16 border-t border-border pt-6 text-sm text-muted">© 2026 autheo.dev</footer>
     </div>
   );
 }

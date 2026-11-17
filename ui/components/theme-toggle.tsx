@@ -11,13 +11,23 @@ export function ThemeToggle() {
   useEffect(() => setMounted(true), []);
 
   const dark = resolvedTheme === "dark";
+  const label = mounted
+    ? dark
+      ? "Switch to day theme"
+      : "Switch to night theme"
+    : "Toggle theme";
+
   return (
     <button
-      aria-label="Toggle theme"
+      type="button"
+      aria-label={label}
+      aria-pressed={mounted ? dark : undefined}
+      title={label}
       onClick={() => setTheme(dark ? "light" : "dark")}
-      className="tap-44 flex h-8 w-8 items-center justify-center rounded-md border border-border text-secondary hover:bg-subtle hover:text-fg"
+      className="tap-44 flex h-8 w-8 items-center justify-center rounded-md border border-border text-secondary transition-colors duration-[240ms] hover:bg-subtle hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
     >
-      {!mounted ? <Sun className="h-4 w-4" /> : dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+      {/* Avoid hydration mismatch: render a neutral icon until mounted. */}
+      {!mounted || !dark ? <Sun className="h-4 w-4" aria-hidden="true" /> : <Moon className="h-4 w-4" aria-hidden="true" />}
     </button>
   );
 }

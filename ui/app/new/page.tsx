@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Github, Search, Loader2, GitBranch, FolderGit2, Lock, ExternalLink, ChevronDown, Plus, X, KeyRound, AlertTriangle, RefreshCw } from "lucide-react";
+import { ArrowLeft, Github, Search, Loader2, GitBranch, FolderGit2, Lock, ExternalLink, ChevronDown, Plus, X, KeyRound, AlertTriangle, RefreshCw, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { Card, Button, Input, Badge } from "@/components/ui";
 import { GlobeEmptyState } from "@/components/globe";
@@ -13,6 +13,11 @@ import { cachedJson } from "@/lib/cache";
 import { cn } from "@/lib/utils";
 import { PreparingDeployment } from "@/components/clone-animation";
 import Image from "next/image";
+import { MarketplaceDeploymentModal } from "@/components/marketplace-deployment-modal";
+import { DeploymentModelHelp } from "@/components/deployment-model-help";
+import { gamePresetById, isSensitiveGameEnv, type GameServerPreset, type GamePresetFields } from "@/lib/game-server-presets";
+
+import { GamesMenu, ConfigureGame } from "@/components/game-hosting";
 
 const PREPARING_MS = 2800;
 const GIT_SCOPE = "openedge";
@@ -38,7 +43,7 @@ interface GhDetail {
   credential?: string;
 }
 
-interface TemplateBase {
+interface TemplateBase extends GamePresetFields {
   name: string;
   desc: string;
   tag: string;
@@ -59,6 +64,7 @@ interface ImageTemplate extends TemplateBase {
   protocol?: string;
   env?: Record<string, string>;
   memory?: string;
+  volumeMountPath?: string;
   repo?: undefined;
 }
 
@@ -86,8 +92,27 @@ const TEMPLATES: Template[] = [
   { name: "Cloudflare Workers", desc: "Deploy serverless functions to the edge.", repo: "https://github.com/cloudflare/templates", root: "worker-publisher-template", tag: "CF", color: "#f6821f", icon: "/frameworks/cloudflare-workers.png" },
   { name: "HTML Starter", desc: "A clean static site, deployed instantly.", repo: "https://github.com/mdn/beginner-html-site", tag: "H", color: "#e34f26", icon: "/frameworks/html5.png" },
   { name: "Container (Dockerfile)", desc: "Railway-style: build & run any Dockerfile.", repo: "https://github.com/crccheck/docker-hello-world", tag: "D", color: "#2496ed", icon: "/frameworks/docker.png" },
-  { name: "Minecraft Server", desc: "Java Edition server (itzg/minecraft-server) with a persistent world, raw TCP.", image: "itzg/minecraft-server:latest", port: 25565, protocol: "tcp", env: { EULA: "TRUE" }, memory: "3g", tag: "MC", color: "#5b8c3e" },
+  // Game servers are deliberately NOT generic templates: they live only in the
+  // <GamesMenu> catalog (lib/game-server-presets.ts) and open the guided
+  // <ConfigureGame> setup, so no game settings or env keys ever prefill the
+  // generic template grid or its Environment Variables section.
+
+  // Web3 / smart contracts (EVM) — one entry per directory of Chainlink's
+  // smart-contract-examples monorepo. Each is a self-contained Hardhat
+  // project: the Node build lane installs + compiles it, and your RPC URL /
+  // deployer key go in Environment Variables on the configure screen (they
+  // stay encrypted at rest). Contract dirs have no long-running server —
+  // the deployment surfaces the compile + deploy build logs.
+  { name: "Smart Contract — Lottery", desc: "Chainlink VRF + Automation lottery dApp (Hardhat, EVM).", repo: "https://github.com/smartcontractkit/smart-contract-examples", root: "lottery", branch: "main", tag: "Ξ", color: "#375bd2" },
+  { name: "Smart Contract — Random SVG NFT", desc: "On-chain generative SVG NFT minted with Chainlink VRF (Hardhat).", repo: "https://github.com/smartcontractkit/smart-contract-examples", root: "random-svg-nft", branch: "main", tag: "Ξ", color: "#627eea" },
+  { name: "Smart Contract — NFT Collection", desc: "Full NFT collection starter: ERC-721, deploy scripts, Chainlink (Hardhat).", repo: "https://github.com/smartcontractkit/smart-contract-examples", root: "ultimate-nft-repo", branch: "main", tag: "Ξ", color: "#8247e5" },
 ];
+
+/** Generic (non-game) env validation: key shape and single-line values only. */
+function genericEnvErrors(env: Record<string, string>): string[] {
+  return Object.entries(env).some(([key, value]) => ["__proto__", "prototype", "constructor"].includes(key) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || /[\r\n\x00]/.test(value))
+    ? ["Environment keys must be letters, numbers or _ and values must be single-line."] : [];
+}
 
 function slug(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -142,12 +167,35 @@ export default function NewProjectPage() {
   const [ghCta, setGhCta] = useState<{ text: string; approveUrl?: string } | null>(null);
   const [repoQ, setRepoQ] = useState("");
   const [selected, setSelected] = useState<Template | null>(null);
+  const presetRouteHandled = useRef(false);
   const [tplPage, setTplPage] = useState(0);
   const [preparing, setPreparing] = useState<{ template: Template | null; team: string; src: string; dest: string } | null>(null);
+  const [marketplaceOpen, setMarketplaceOpen] = useState(false);
+
+  // Public discovery links can open a real preset directly. This runs only
+  // after authentication has returned the visitor to the original /new URL;
+  // Clerk's middleware preserves the full query string in redirect_url.
+  useEffect(() => {
+    if (presetRouteHandled.current) return;
+    presetRouteHandled.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const gameId = params.get("game");
+    if (gameId) {
+      const preset = gamePresetById(gameId);
+      if (preset) {
+        window.setTimeout(() => setSelected(preset), 0);
+        return;
+      }
+    }
+    if (params.get("category") === "games") {
+      window.setTimeout(() => document.getElementById("game-servers")?.scrollIntoView({ block: "start" }), 0);
+    }
+  }, []);
 
   const TPL_PER = 5;
-  const tplPages = Math.max(1, Math.ceil(TEMPLATES.length / TPL_PER));
-  const shownTemplates = TEMPLATES.slice(tplPage * TPL_PER, tplPage * TPL_PER + TPL_PER);
+  const nonGameTemplates = TEMPLATES.filter(t => !t.gameId);
+  const tplPages = Math.max(1, Math.ceil(nonGameTemplates.length / TPL_PER));
+  const shownTemplates = nonGameTemplates.slice(tplPage * TPL_PER, tplPage * TPL_PER + TPL_PER);
 
   useEffect(() => {
     cachedJson<GhDetail>("/api/github/status", 30_000).then(async (s) => {
@@ -176,7 +224,7 @@ export default function NewProjectPage() {
         let restrictedCta: { text: string; approveUrl?: string } | null = null;
         for (const res of results) {
           if (res?.restricted && res?.approve_url && !restrictedCta) {
-            restrictedCta = { text: "An organization restricts OpenEdge. Approve the app to import its repositories.", approveUrl: res.approve_url };
+            restrictedCta = { text: "An organization restricts DevHub. Approve the app to import its repositories.", approveUrl: res.approve_url };
           }
           for (const r of (res?.repos as GhRepo[]) || []) {
             if (r?.full_name && !seen.has(r.full_name)) { seen.add(r.full_name); merged.push(r); }
@@ -288,6 +336,7 @@ export default function NewProjectPage() {
     cpus?: string;
     ports?: { container_port: number; protocol: string; label?: string }[];
     env?: Record<string, string>;
+    volumeMountPath?: string;
     template?: Template | null;
   }) {
     setDeploying(true);
@@ -302,6 +351,7 @@ export default function NewProjectPage() {
         memory: opts.memory,
         cpus: opts.cpus,
         ports: opts.ports,
+        volume_mount_path: opts.volumeMountPath,
         env: opts.env && Object.keys(opts.env).length ? opts.env : undefined,
       });
       const guessed = slug(opts.image.split("/").pop()?.split(":")[0] || "app");
@@ -360,6 +410,7 @@ export default function NewProjectPage() {
   }
 
   if (selected) {
+    if (selected.gameId) return <ConfigureGame key={selected.gameId} game={selected as unknown as GameServerPreset} onBack={() => { setSelected(null); setError(""); }} onCreate={opts => runImageDeploy({ ...opts, template: selected })} deploying={deploying} error={error} />;
     return isImageTemplate(selected) ? (
       <ConfigureImageTemplate
         template={selected}
@@ -380,10 +431,43 @@ export default function NewProjectPage() {
       </Link>
       <h1 className="mb-6 text-2xl sm:text-3xl font-semibold tracking-tight">Let&apos;s build something new</h1>
 
+      <GamesMenu onSelect={game => { setError(""); setSelected(game); }} disabled={deploying} />
+
+      {/* Web3 spotlight — smart contracts are a first-class deployment shape on
+          this platform, so surface them ABOVE the source bar (they're also in
+          the Clone Template list below, which keeps paging). Each jumps straight
+          to the same configure screen as any template (team picker + env vars
+          for the RPC URL / deployer key). Uploading your own contract source is
+          the existing .zip / Git URL paths below — no contract-specific flow. */}
+      <div className="mb-8">
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-medium text-secondary">Deploy a smart contract</h2>
+          <Link href="/new/upload" className="text-xs text-secondary underline decoration-dotted underline-offset-2 hover:text-fg">
+            Upload your own (.zip)
+          </Link>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {TEMPLATES.filter((t) => t.tag === "Ξ").map((t) => (
+            <button
+              key={t.name}
+              onClick={() => { setError(""); setSelected(t); }}
+              disabled={deploying}
+              className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm hover:bg-subtle disabled:opacity-50"
+            >
+              <span className="flex h-6 w-6 items-center justify-center rounded text-xs font-bold text-white" style={{ background: t.color }}>
+                {t.tag}
+              </span>
+              <span className="font-medium">{t.name.replace("Smart Contract — ", "")}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       <Card className="mb-2 p-2">
         <div className="flex items-center gap-2">
           <Input
             placeholder="Git repository URL or container image… e.g. github.com/owner/repo, fruitbox12/simplifi:latest, quay.io/org/img:tag"
+
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit()}
@@ -492,14 +576,20 @@ export default function NewProjectPage() {
           </div>
         )}
       </Card>
+      <DeploymentModelHelp className="mb-4" />
       <p className="mb-8 text-center text-sm text-muted">
-        Paste a Git repo URL, or a container image from Docker Hub / Quay / any registry — OpenEdge
+        Paste a Git repo URL, or a container image from Docker Hub / Quay / any registry — DevHub
         creates the project and builds → deploys it (clone &amp; build, or pull the image).{" "}
         <Link href="/new/upload" className="text-secondary underline decoration-dotted underline-offset-2 hover:text-fg">
           No repository? Upload a .zip instead
         </Link>
         .
       </p>
+      <div className="mb-8 flex justify-center">
+        <Button variant="outline" onClick={() => setMarketplaceOpen(true)}>
+          <ShieldCheck className="h-4 w-4" /> Deploy from Marketplace
+        </Button>
+      </div>
       {error ? <p className="mb-6 text-center text-sm text-red-600">{error}</p> : null}
 
       <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
@@ -614,6 +704,7 @@ export default function NewProjectPage() {
           <GlobeEmptyState title="" desc={undefined} />
         </div>
       </Card>
+      {marketplaceOpen && <MarketplaceDeploymentModal onClose={() => setMarketplaceOpen(false)} />}
     </div>
   );
 }
@@ -792,6 +883,7 @@ function ConfigureTemplate({
             </div>
           )}
         </div>
+        <DeploymentModelHelp className="mb-6" />
 
         {error ? <p className="mb-4 text-sm text-red-600">{error}</p> : null}
 
@@ -832,6 +924,7 @@ function ConfigureImageTemplate({
     memory?: string;
     ports?: { container_port: number; protocol: string; label?: string }[];
     env?: Record<string, string>;
+    volumeMountPath?: string;
   }) => void;
   deploying: boolean;
   error: string;
@@ -840,9 +933,11 @@ function ConfigureImageTemplate({
   const [port, setPort] = useState(String(template.port ?? ""));
   const [protocol, setProtocol] = useState(template.protocol ?? "tcp");
   const [memory, setMemory] = useState(template.memory ?? "");
-  const [extraPorts, setExtraPorts] = useState<{ port: string; protocol: string; label: string }[]>([]);
+  const [extraPorts, setExtraPorts] = useState<{ port: string; protocol: string; label: string }[]>(() => (template.extraPorts ?? []).map(row => ({ ...row, port: String(row.port) })));
   const [envVars, setEnvVars] = useState<{ key: string; value: string }[]>(() => {
-    const rows = Object.entries(template.env ?? {}).map(([key, value]) => ({ key, value }));
+    // Game presets never reach this generic screen (they use ConfigureGame);
+    // never seed game env here even if one is routed by mistake.
+    const rows = template.gameId ? [] : Object.entries(template.env ?? {}).map(([key, value]) => ({ key, value }));
     return rows.length ? rows : [{ key: "", value: "" }];
   });
   const [team, setTeam] = useState<string>(() => currentTeam());
@@ -857,6 +952,8 @@ function ConfigureImageTemplate({
     for (const { key, value } of envVars) if (key.trim()) out[key.trim()] = value;
     return out;
   };
+
+  const envErrors = genericEnvErrors(buildEnv());
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -878,8 +975,10 @@ function ConfigureImageTemplate({
 
         <p className="mb-6 text-sm text-secondary">
           A pre-built image — no build step. The platform pulls it directly and attaches a persistent
-          volume at <span className="font-mono">/data</span> that survives redeploys.
+          volume at <span className="font-mono">{template.volumeMountPath ?? "/data"}</span> that survives redeploys.
         </p>
+
+        {!!template.setupNotes?.length && <ul className="mb-6 list-disc space-y-2 pl-5 text-xs text-secondary">{template.setupNotes.map(note => <li key={note}>{note}</li>)}</ul>}
 
         <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
@@ -956,7 +1055,7 @@ function ConfigureImageTemplate({
               <div key={i} className="flex items-center gap-2">
                 <Input value={row.key} placeholder="KEY" className="flex-1 font-mono text-xs"
                   onChange={(e) => setEnvVars((rows) => rows.map((r, j) => (j === i ? { ...r, key: e.target.value } : r)))} />
-                <Input value={row.value} placeholder="value" className="flex-1 font-mono text-xs"
+                <Input type={isSensitiveGameEnv(row.key) ? "password" : "text"} autoComplete="off" value={row.value} placeholder="value" className="flex-1 font-mono text-xs"
                   onChange={(e) => setEnvVars((rows) => rows.map((r, j) => (j === i ? { ...r, value: e.target.value } : r)))} />
                 <button type="button" className="shrink-0 rounded-md p-2 text-muted hover:bg-subtle hover:text-fg"
                   onClick={() => setEnvVars((rows) => (rows.length <= 1 ? [{ key: "", value: "" }] : rows.filter((_, j) => j !== i)))}>
@@ -973,11 +1072,14 @@ function ConfigureImageTemplate({
             <Plus className="h-3.5 w-3.5" /> Add Variable
           </button>
         </div>
+        <DeploymentModelHelp className="mb-6" />
 
+        {envErrors.length > 0 && <p role="alert" className="mb-4 text-sm text-red-600">{envErrors.join(" ")}</p>}
         {error ? <p className="mb-4 text-sm text-red-600">{error}</p> : null}
 
         <Button
           onClick={async () => {
+            if (genericEnvErrors(buildEnv()).length) return;
             if (typeof window !== "undefined") {
               await switchTeam(team === "personal" ? "__personal__" : team);
             }
@@ -1000,9 +1102,10 @@ function ConfigureImageTemplate({
               memory: memory.trim() || undefined,
               ports,
               env: buildEnv(),
+              volumeMountPath: template.volumeMountPath,
             });
           }}
-          disabled={deploying}
+          disabled={deploying || envErrors.length > 0}
           className="w-full justify-center bg-fg py-2.5 text-bg"
         >
           {deploying ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</> : "Create"}

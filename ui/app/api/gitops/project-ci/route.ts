@@ -15,7 +15,7 @@ function parseRepo(input: string): { owner: string; repo: string } | null {
   return null;
 }
 
-/** Installs the OpenEdge deploy workflow and the OPENEDGE_WEBHOOK_URL Actions variable into a PROJECT's source repo so pushes auto-trigger build + deploy; body
+/** Installs the DevHub deploy workflow and the legacy OPENEDGE_WEBHOOK_URL Actions variable into a PROJECT's source repo so pushes auto-trigger build + deploy; body
  *  `{ repo }` (a clone URL or "owner/repo"). A real repo webhook is primary (the node's `/v1/git/webhook` makes a production deploy for the prod branch and a
  *  preview for every other branch and PR); the Actions workflow (push-to-main only) is installed ONLY when the webhook could not be, never both (it would
  *  double-fire). A no-op only when GitHub is genuinely not part of this deployment: "not connected" and an install where neither landed are 502s that keep
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
         variableSet,
         error: writeErrors.length
           ? writeErrors.join("; ")
-          : "no OpenEdge webhook URL configured and the workflow install did not run",
+          : "no DevHub webhook URL configured and the workflow install did not run",
       },
       { status: 502 }
     );

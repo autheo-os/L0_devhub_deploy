@@ -6,7 +6,7 @@ const SW_RELOAD_WINDOW_MS = 60_000;
 const MAX_SW_RELOADS_PER_WINDOW = 2;
 const CLERK_BADGE_WATCH_MS = 15000;
 
-// Registers the service worker so shadw is installable and works offline; a no-op without service-worker support.
+// Registers the service worker so autheo is installable and works offline; a no-op without service-worker support.
 export function PwaRegister() {
   useEffect(() => {
     if (typeof window === "undefined" || !("serviceWorker" in navigator) || !navigator.serviceWorker) return;
@@ -17,12 +17,12 @@ export function PwaRegister() {
       if (refreshing || !hadController) return;
       refreshing = true;
       try {
-        const raw = sessionStorage.getItem("shadw-sw-reloads");
+        const raw = sessionStorage.getItem("autheo-sw-reloads");
         const now = Date.now();
         const hits = (raw ? (JSON.parse(raw) as number[]) : []).filter((t) => now - t < SW_RELOAD_WINDOW_MS);
         if (hits.length >= MAX_SW_RELOADS_PER_WINDOW) return;
         hits.push(now);
-        sessionStorage.setItem("shadw-sw-reloads", JSON.stringify(hits));
+        sessionStorage.setItem("autheo-sw-reloads", JSON.stringify(hits));
       } catch {}
       window.location.reload();
     };

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 258 48" role="img" aria-labelledby="title">
+  <title id="title">Autheo</title>
+  <g fill="#00e8c3">
+    <path fill-rule="evenodd" d="M0 44 17.5 4h10L45 44H34l-4-9H15l-4 9H0Zm19-18h7l-3.5-9-3.5 9Z"/>
+    <path d="M49 5h10v23c0 6.5 3 10 9 10s9-3.5 9-10V5h10v24c0 11.5-7.5 18-19 18s-19-6.5-19-18V5Z"/>
+    <path d="M91 5h38v9h-14v32h-10V14H91V5Z"/>
+    <path d="M134 5h10v15h15V5h10v41h-10V29h-15v17h-10V5Z"/>
+    <path d="M177 5h33v9h-23v7h20v9h-20v7h23v9h-33V5Z"/>
+    <path fill-rule="evenodd" d="M236 4c13 0 22 8.5 22 21.5S249 47 236 47s-22-8.5-22-21.5S223 4 236 4Zm0 10c-7 0-12 4.5-12 11.5S229 37 236 37s12-4.5 12-11.5S243 14 236 14Z"/>
+  </g>
+</svg>

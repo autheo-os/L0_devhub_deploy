@@ -18,11 +18,11 @@ import {
 
 export const metadata: Metadata = pageMeta({
   title: "Solutions",
-  socialTitle: "Solutions — shadw",
+  socialTitle: "Solutions — autheo",
   description:
-    "See how startups, agencies, and enterprises ship on shadw — a cloud you can self-host for full-stack apps, APIs, static sites, cron jobs, realtime, and internal tools, with Vercel-style Git deploys.",
+    "See how startups, agencies, and enterprises ship on autheo — a cloud you can self-host for full-stack apps, APIs, static sites, cron jobs, realtime, and internal tools, with Vercel-style Git deploys.",
   twitterDescription:
-    "See how startups, agencies, and enterprises ship on shadw — a cloud you can self-host for full-stack apps, APIs, static sites, cron, realtime, and internal tools.",
+    "See how startups, agencies, and enterprises ship on autheo — a cloud you can self-host for full-stack apps, APIs, static sites, cron, realtime, and internal tools.",
   path: "/solutions",
 });
 export const viewport = darkViewport;
@@ -116,7 +116,7 @@ export default function SolutionsPage() {
         <div className="max-w-2xl">
           <h2 className="text-3xl font-bold tracking-tight">Solutions for every team</h2>
           <p className="mt-3 text-zinc-400">
-            From your first deploy to machines you run yourself, shadw meets you where you are.
+            From your first deploy to machines you run yourself, autheo meets you where you are.
           </p>
         </div>
 
