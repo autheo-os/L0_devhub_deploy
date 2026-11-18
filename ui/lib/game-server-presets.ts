@@ -73,19 +73,10 @@ const GAME_METADATA: Record<string, GamePresetFields> = {
   "Don't Starve Together Server": {"gameId":"dst","platform":"linux/amd64","imageTags":["latest","vanilla","nightly"],"runtimeVersionNote":"steamcmd updates the DST server (app 343050) and mods on every start, independently of the OCI tag.","fields":[{"key":"DST_CLUSTER_TOKEN","group":"access","label":"Klei cluster token","kind":"secret","help":"Required. In Don't Starve Together open Account → Games → Don't Starve Together Servers → Add New Server and copy the token. Single line, no spaces."},{"key":"DST_SERVER_ARCH","group":"advanced","label":"Server program","kind":"select","options":["amd64","x86"],"help":"amd64 (64-bit) per upstream README; x86 is the image's legacy default.","optionLabels":{"amd64":"64-bit (recommended)","x86":"32-bit (legacy)"}}],"profiles":[{"id":"cluster","label":"Master + Caves cluster (64-bit)","env":{"DST_SERVER_ARCH":"amd64"}},{"id":"legacy","label":"Master + Caves cluster (32-bit legacy binary)","env":{"DST_SERVER_ARCH":"x86"}}]},
   "Team Fortress 2 Server": {"gameId":"tf2","platform":"linux/amd64","imageTags":["latest","4","nightly"],"runtimeVersionNote":"TF2 (app 232250) is baked in at build time and srcds -autoupdate may update it at runtime; tf2-base 4.x tags track image releases, not TF2 versions.","fields":[{"key":"SERVER_HOSTNAME","group":"basics","label":"Server name","kind":"text","help":"1-63 characters; no quotes, semicolons, backslashes, $ or backticks."},{"key":"SERVER_PASSWORD","group":"access","label":"Join password (optional)","kind":"secret","help":"Leave blank so anyone can join. No spaces, quotes or semicolons."},{"key":"RCON_PASSWORD","group":"access","label":"Remote admin (RCON) password","kind":"secret","help":"Required, 8-64 characters, no spaces. Used inside the container for health checks and clean shutdown; the RCON port is never published."},{"key":"SERVER_TOKEN","group":"access","label":"Steam server token / GSLT (optional)","kind":"secret","help":"Lets the server appear in the Steam server list. 32 hexadecimal characters from steamcommunity.com/dev/managegameservers (App ID 440)."},{"key":"STV_PASSWORD","group":"advanced","label":"SourceTV password (optional)","kind":"secret","help":"SourceTV's port is not published."},{"key":"ENABLE_FAKE_IP","group":"advanced","label":"Steam Datagram Relay","kind":"select","options":["0","1"],"optionLabels":{"0":"Off, players connect directly","1":"On, route through Steam's relay"}}],"profiles":[{"id":"private","label":"Direct-connect UDP 27015","env":{"ENABLE_FAKE_IP":"0"}},{"id":"sdr","label":"Steam Datagram Relay (fake IP)","env":{"ENABLE_FAKE_IP":"1"}}]},
 };
-/** Every preset this catalog knows how to configure and validate. */
-export const ALL_GAME_PRESETS: GameServerPreset[] = BASE_GAME_PRESETS.map(p => ({ ...p, ...GAME_METADATA[p.name] }));
+export const GAME_SERVER_PRESETS: GameServerPreset[] = BASE_GAME_PRESETS.map(p => ({ ...p, ...GAME_METADATA[p.name] }));
 
-/** Presets added AFTER the deployed 2026-10-08 build (DevHub 405075e, seven games). They stay in the code and in the
- *  offline checks, but are not offered in the catalog until they are reviewed. Empty this set to offer them again. */
-export const HELD_GAME_PRESET_IDS: ReadonlySet<string> = new Set(["gesource", "romestead", "dst", "tf2"]);
-
-/** What the New Project page offers: Minecraft, Terraria, Factorio, Palworld, Valheim, Arma 3 and ARK. */
-export const GAME_SERVER_PRESETS: GameServerPreset[] = ALL_GAME_PRESETS.filter(p => !HELD_GAME_PRESET_IDS.has(p.gameId ?? ""));
-
-/** Looks across ALL presets so a project already created from a held game still resolves its settings. */
 export function gamePresetById(gameId: string): GameServerPreset | undefined {
-  return ALL_GAME_PRESETS.find(game => game.gameId === gameId);
+  return GAME_SERVER_PRESETS.find(game => game.gameId === gameId);
 }
 
 /** Friendly discovery metadata only; never exposes raw env keys or credentials. */
