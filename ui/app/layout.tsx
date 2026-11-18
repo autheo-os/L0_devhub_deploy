@@ -13,7 +13,6 @@ import { Toaster } from "@/components/toast";
 import { GithubConnectError } from "@/components/github-connect-error";
 import { LoginOtpChallenge } from "@/components/login-otp-challenge";
 import { VitalsBeacon } from "@/components/vitals-beacon";
-import { WalletProvider } from "@/components/wallet-connection";
 
 export const instant = false;
 
@@ -121,7 +120,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Toaster />
         <LoginOtpChallenge />
         <ThemeProvider>
-          <WalletProvider>
             <Suspense fallback={null}>
               <ChromeTop />
             </Suspense>
@@ -132,7 +130,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Suspense fallback={null}>
               <ChromeBottom />
             </Suspense>
-          </WalletProvider>
         </ThemeProvider>
       </body>
     </html>

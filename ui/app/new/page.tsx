@@ -13,7 +13,6 @@ import { cachedJson } from "@/lib/cache";
 import { cn } from "@/lib/utils";
 import { PreparingDeployment } from "@/components/clone-animation";
 import Image from "next/image";
-import { MarketplaceDeploymentModal } from "@/components/marketplace-deployment-modal";
 import { DeploymentModelHelp } from "@/components/deployment-model-help";
 import { gamePresetById, isSensitiveGameEnv, type GameServerPreset, type GamePresetFields } from "@/lib/game-server-presets";
 
@@ -170,7 +169,6 @@ export default function NewProjectPage() {
   const presetRouteHandled = useRef(false);
   const [tplPage, setTplPage] = useState(0);
   const [preparing, setPreparing] = useState<{ template: Template | null; team: string; src: string; dest: string } | null>(null);
-  const [marketplaceOpen, setMarketplaceOpen] = useState(false);
 
   // Public discovery links can open a real preset directly. This runs only
   // after authentication has returned the visitor to the original /new URL;
@@ -585,11 +583,6 @@ export default function NewProjectPage() {
         </Link>
         .
       </p>
-      <div className="mb-8 flex justify-center">
-        <Button variant="outline" onClick={() => setMarketplaceOpen(true)}>
-          <ShieldCheck className="h-4 w-4" /> Deploy from Marketplace
-        </Button>
-      </div>
       {error ? <p className="mb-6 text-center text-sm text-red-600">{error}</p> : null}
 
       <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
@@ -704,7 +697,6 @@ export default function NewProjectPage() {
           <GlobeEmptyState title="" desc={undefined} />
         </div>
       </Card>
-      {marketplaceOpen && <MarketplaceDeploymentModal onClose={() => setMarketplaceOpen(false)} />}
     </div>
   );
 }

@@ -1,3 +1,5 @@
+> **Historical.** This ledger records an earlier merge that ported the DevHub Marketplace, THEO billing, devhub.yml and game-server backend onto shadow. That backend code was later removed: the backend is now a one-to-one mirror of dywongcloud/shadow 661ae7d. Kept for the record only.
+
 # DevHub (9f5162a) onto shadow main: backend / ansible / root ledger
 
 Branch `rec-rust`, base shadow `661ae7d`, merged DevHub `9f5162a`. Scope: every conflicted file outside `ui/`,
