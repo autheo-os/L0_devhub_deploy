@@ -33,7 +33,7 @@ function ClerkIdentity({ children }: { children: (id: Identity) => React.ReactNo
   return <>{children(derive(user))}</>;
 }
 
-const clerkOn = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+const clerkOn = typeof process !== "undefined" && !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 /** Provides the signed-in user's identity (name/email/avatar) to its children through a render prop: Clerk when enabled, otherwise a local default. */
 export function WithIdentity({ children }: { children: (id: Identity) => React.ReactNode }) {

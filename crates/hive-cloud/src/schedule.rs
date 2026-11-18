@@ -65,6 +65,7 @@ pub fn place_for_project(
     needs_runtime_artifact: bool,
     needs_build_isolation: bool,
     needs_build_toolchain: Option<&str>,
+    approved_node_ids: Option<&std::collections::HashSet<String>>,
 ) -> Vec<Target> {
     let needs_interpreter = needs_interpreter.into();
     if let Some(holder) = cloud.leases.owner_of(project) {
@@ -81,6 +82,7 @@ pub fn place_for_project(
             let runtime_artifact_ok = runtime_artifact_capable(n, needs_runtime_artifact);
             let build_isolation_ok = build_isolation_capable(n, needs_build_isolation);
             let build_toolchain_ok = build_toolchain_capable(n, needs_build_toolchain);
+            let marketplace_ok = approved_node_ids.is_none_or(|approved| approved.contains(&n.id));
             if n.healthy
                 && region_ok
                 && reachable
@@ -90,6 +92,7 @@ pub fn place_for_project(
                 && runtime_artifact_ok
                 && build_isolation_ok
                 && build_toolchain_ok
+                && marketplace_ok
             {
                 tracing::info!(project = %project, holder = %holder, "placement: sticking with current lease holder for redeploy");
                 let target = if n.name == cloud.node_name {
@@ -122,6 +125,7 @@ pub fn place_for_project(
         needs_runtime_artifact,
         needs_build_isolation,
         needs_build_toolchain,
+        approved_node_ids,
     )
 }
 
@@ -390,6 +394,8 @@ pub fn dispatch_fallbacks(
     needs_runtime_artifact: bool,
     needs_build_isolation: bool,
     needs_build_toolchain: Option<&str>,
+    // Immutable Marketplace allowlist: a fallback may never leave the buyer-approved node set.
+    approved_node_ids: Option<&std::collections::HashSet<String>>,
     exclude: &[String],
 ) -> Vec<Target> {
     let needs_interpreter = needs_interpreter.into();
@@ -418,6 +424,7 @@ pub fn dispatch_fallbacks(
                 && n.healthy
                 && !exclude.iter().any(|x| x.eq_ignore_ascii_case(&n.name))
                 && reachable(cloud, n)
+                && approved_node_ids.is_none_or(|approved| approved.contains(&n.id))
                 && capable(
                     n,
                     is_container,
@@ -464,6 +471,9 @@ pub fn place(
     needs_runtime_artifact: bool,
     needs_build_isolation: bool,
     needs_build_toolchain: Option<&str>,
+    // Immutable Marketplace policy allowlist. A node may be selected only when its authoritative
+    // registry id is listed; live health, reachability, and capacity still must independently pass.
+    approved_node_ids: Option<&std::collections::HashSet<String>>,
 ) -> Vec<Target> {
     let needs_interpreter = needs_interpreter.into();
     let nodes = cloud.registry.nodes();
@@ -473,6 +483,9 @@ pub fn place(
     let target_of = |n: &NodeInfo| -> Target { target_of(cloud, n) };
     let reachable = |n: &NodeInfo| -> bool { reachable(cloud, n) };
     let capable = |n: &NodeInfo| -> bool {
+        if approved_node_ids.is_some_and(|approved| !approved.contains(&n.id)) {
+            return false;
+        }
         capable(
             n,
             is_container,
@@ -512,7 +525,12 @@ pub fn place(
         for region in regions {
             let healthy_in_region: Vec<&NodeInfo> = nodes
                 .iter()
-                .filter(|n| n.healthy && n.region.eq_ignore_ascii_case(region) && reachable(n))
+                .filter(|n| {
+                    n.healthy
+                        && n.region.eq_ignore_ascii_case(region)
+                        && reachable(n)
+                        && approved_node_ids.is_none_or(|approved| approved.contains(&n.id))
+                })
                 .collect();
             if healthy_in_region.is_empty() {
                 continue;
@@ -522,6 +540,16 @@ pub fn place(
                 .copied()
                 .filter(|n| capable(n))
                 .collect();
+            // A Marketplace allowlist is an authorization boundary, not a preference: unlike ordinary
+            // explicit-region placement it may never widen from an approved-but-unhealthy or
+            // capacity-constrained candidate to another node.
+            if approved_node_ids.is_some() && capable_here.is_empty() {
+                tracing::warn!(
+                    region = %region,
+                    "placement: no Marketplace-approved node in this region passes current health/capacity/capability checks"
+                );
+                continue;
+            }
             if needs_gpu && capable_here.is_empty() {
                 tracing::warn!(region = %region, "placement: no GPU-capable node in this region — not widening (gpu request)");
                 continue;
@@ -775,6 +803,7 @@ mod tests {
             musql_engine: None,
             gpu_model: None,
             gpu_vram_mb: 0,
+            gpu_devices: Vec::new(),
             id: name.into(),
             name: name.into(),
             region: region.into(),
@@ -799,6 +828,9 @@ mod tests {
             city: None,
             country: None,
             cpu_cores: 4,
+            cpu_model: None,
+            cpu_physical_cores: None,
+            cpu_architecture: None,
             mem_total_mb: mem,
             disk_total_gb: 50,
             // Non-zero so these fixtures are ABOVE `disk_floor_gb()` and stay

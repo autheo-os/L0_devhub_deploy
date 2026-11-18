@@ -19,7 +19,7 @@ import {
 import { timeAgo } from "@/lib/utils";
 
 const CHANNELS = [
-  { key: "web", icon: <Bell className="h-4 w-4" />, title: "Web", desc: "Receive notifications in the OpenEdge dashboard." },
+  { key: "web", icon: <Bell className="h-4 w-4" />, title: "Web", desc: "Receive notifications in the DevHub dashboard." },
   { key: "email", icon: <AtSign className="h-4 w-4" />, title: "Email", desc: "" },
   { key: "push", icon: <Smartphone className="h-4 w-4" />, title: "Push", desc: "" },
   { key: "sms", icon: <Phone className="h-4 w-4" />, title: "SMS", desc: "" },

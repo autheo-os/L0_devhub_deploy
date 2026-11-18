@@ -4,22 +4,22 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{
+    Json, Router,
     extract::{DefaultBodyLimit, Path, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode},
     routing::{delete, get, patch, post, put},
-    Json, Router,
 };
 use base64::Engine;
 use fluid_gateway::{RumDevice, RumRaw};
-use hive_core::{now_ms, BuildJob, JobState, ResourceSpec};
+use hive_core::{BuildJob, JobState, ResourceSpec, now_ms};
 use hive_edge::{
+    CronJob, WorkflowDef,
     bot::BotPolicy,
     routing::{Redirect, Rewrite},
     waf::WafRule,
-    CronJob, WorkflowDef,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::process::Command;
 
 use crate::state::CloudState;
@@ -70,6 +70,7 @@ pub fn router(cloud: Arc<CloudState>) -> Router {
         .route("/healthz", get(|| async { "ok" }))
         .route("/v1/mesh", get(mesh_health))
         .route("/v1/overview", get(overview))
+        .route("/v1/security/posture", get(security_posture))
         .route("/v1/tasks/health", get(tasks_health))
         .route("/v1/nodes", get(nodes))
         .route("/v1/serve-hosts", get(serve_hosts_public))
@@ -210,6 +211,10 @@ pub fn router(cloud: Arc<CloudState>) -> Router {
         .route(
             "/v1/projects/:project/container",
             put(project_container_put).delete(project_container_delete),
+        )
+        .route(
+            "/v1/projects/:project/game",
+            put(project_game_put).delete(project_game_delete),
         )
         .route("/v1/projects/:project/env", post(project_env_put))
         .route("/v1/projects/:project/env/:key", delete(project_env_delete))
@@ -357,6 +362,10 @@ pub fn router(cloud: Arc<CloudState>) -> Router {
         .route("/v1/admin/overview", get(admin_overview))
         .route("/v1/admin/placement", get(admin_placement))
         .route(
+            "/v1/admin/marketplace",
+            get(crate::marketplace::operator_view),
+        )
+        .route(
             "/v1/admin/audit",
             get(admin_audit).layer(tower_http::compression::CompressionLayer::new()),
         )
@@ -379,12 +388,17 @@ pub fn router(cloud: Arc<CloudState>) -> Router {
         .route("/v1/billing/invoices", get(billing_invoices))
         .route("/v1/billing/checkout", post(billing_checkout))
         .route("/v1/billing/addons", get(billing_addons))
+        .route("/v1/billing/wallet-config", get(billing_wallet_config))
         .route("/v1/billing/checkout/:id", get(billing_checkout_get))
+        .route(
+            "/v1/billing/checkout/:id/payment-intent",
+            post(billing_payment_intent),
+        )
         .route("/v1/billing/confirm", post(billing_confirm))
-        .route("/v1/billing/charge", post(billing_charge))
         .route("/v1/billing/webhook", post(billing_webhook))
         .route("/v1/usage/summary", get(usage_summary))
         .route("/v1/admin/usage/economics", get(usage_economics))
+        .route("/v1/billing/charge", post(billing_charge))
         .route("/v1/admin/billing/grant", post(billing_grant))
         .route("/v1/admin/billing/backfill", post(billing_backfill_run))
         .route(
@@ -974,6 +988,62 @@ async fn project_container_delete(
     Ok(Json(json!(c.projects.get_masked(&project))))
 }
 
+/// `PUT /v1/projects/:project/game` — dashboard-managed game-server config
+/// (`GameServerSettings`: Drive mods folder + in-volume mods dir, version
+/// pins, world-snapshot toggle). Same "settings apply going forward"
+/// contract as `project_container_put`: nothing already running changes;
+/// git.rs merges it on the NEXT deploy, and the caller follows a save with
+/// `/v1/projects/:project/redeploy` to apply it immediately.
+async fn project_game_put(
+    State(c): State<Arc<CloudState>>,
+    headers: HeaderMap,
+    claims: Option<axum::Extension<crate::auth::Claims>>,
+    Path(project): Path<String>,
+    Json(spec): Json<crate::project_settings::GameServerSettings>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    // Same unowned-row claim as project_container_put (see its comment).
+    let t = require_project(&c, &headers, claims.as_ref().map(|e| &e.0), &project)?;
+    c.projects.set_team(&project, &t);
+    // Deploy-input boundary validation (the project_container_put protocol
+    // precedent): reject a subdir that would escape the volume mount now,
+    // with a clear 400, rather than letting the deploy log a skip later.
+    for (field, v) in [
+        ("mods_dest_subdir", spec.mods_dest_subdir.as_deref()),
+        ("world_subdir", spec.world_subdir.as_deref()),
+    ] {
+        if let Some(v) = v.map(str::trim).filter(|s| !s.is_empty()) {
+            if v.starts_with('/')
+                || v.contains('\\')
+                || v.contains('\0')
+                || v.split('/').any(|c| c == "..")
+            {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    format!("{field} {v:?} must be a relative path inside the volume (no leading /, no ..)"),
+                ));
+            }
+        }
+    }
+    c.projects.set_game(&project, Some(spec));
+    crate::persist::persist(&c);
+    Ok(Json(json!(c.projects.get_masked(&project))))
+}
+
+/// `DELETE /v1/projects/:project/game` — clears the dashboard-managed game
+/// config. Changes nothing already deployed; the NEXT deploy stops syncing
+/// mods and snapshotting the world.
+async fn project_game_delete(
+    State(c): State<Arc<CloudState>>,
+    headers: HeaderMap,
+    claims: Option<axum::Extension<crate::auth::Claims>>,
+    Path(project): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    require_project(&c, &headers, claims.as_ref().map(|e| &e.0), &project)?;
+    c.projects.set_game(&project, None);
+    crate::persist::persist(&c);
+    Ok(Json(json!(c.projects.get_masked(&project))))
+}
+
 /// One user-editable port row of `PUT /v1/projects/:project/network`; `protocol` is parsed with the
 /// STRICT `FromStr` (400 on a bad value), never the lenient serde impl reserved for already-stored
 /// state.
@@ -1101,7 +1171,9 @@ pub(crate) async fn project_network_put(
             }
             return Err((
                 StatusCode::BAD_GATEWAY,
-                format!("project '{project}' is hosted on node '{node}' but the network-edit forward failed"),
+                format!(
+                    "project '{project}' is hosted on node '{node}' but the network-edit forward failed"
+                ),
             ));
         }
         return Err((
@@ -1403,7 +1475,9 @@ async fn activate_domain_alias(
     }
     Err((
         StatusCode::BAD_GATEWAY,
-        format!("project '{project}' is hosted on node '{node}' but the domain activation forward failed"),
+        format!(
+            "project '{project}' is hosted on node '{node}' but the domain activation forward failed"
+        ),
     ))
 }
 
@@ -2956,7 +3030,9 @@ pub(crate) async fn deploy_zip(
         image_cpus: None,
         image_pids: None,
         image_ports: None,
+        image_volume_path: None,
         git_token: None,
+        marketplace_placement: None,
     };
     start_named_deploy(&c, &t, req, None).await
 }
@@ -2993,6 +3069,9 @@ pub(crate) struct ImageDeployReq {
     /// doc for the replace-not-merge semantics and the mesh-forwarding caveat.
     #[serde(default)]
     ports: Option<Vec<fluid_core::PortSpec>>,
+    /// Container-internal mount point for the project's named volume.
+    #[serde(default)]
+    volume_mount_path: Option<String>,
     #[serde(default)]
     env: Option<std::collections::BTreeMap<String, String>>,
     #[serde(default)]
@@ -3016,6 +3095,16 @@ pub(crate) async fn deploy_image(
         return Err((
             StatusCode::BAD_REQUEST,
             "Provide an image reference, e.g. fruitbox12/simplifi:latest".into(),
+        ));
+    }
+    if body
+        .volume_mount_path
+        .as_deref()
+        .is_some_and(|path| !crate::git::valid_image_volume_path(path))
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "volume_mount_path must be a normalized absolute container directory".into(),
         ));
     }
     let t = tenant(&c, &headers, claims.as_ref().map(|e| &e.0));
@@ -3046,7 +3135,9 @@ pub(crate) async fn deploy_image(
         image_cpus: body.cpus,
         image_pids: body.pids,
         image_ports: body.ports,
+        image_volume_path: None,
         git_token: None,
+        marketplace_placement: None,
     };
     start_named_deploy(&c, &t, req, None).await
 }
@@ -3476,11 +3567,7 @@ fn api_key_team(c: &Arc<CloudState>, h: &HeaderMap) -> Option<String> {
 
 /// Normalize an owner slug: empty/absent => "personal".
 pub(crate) fn norm(team: &str) -> &str {
-    if team.is_empty() {
-        "personal"
-    } else {
-        team
-    }
+    if team.is_empty() { "personal" } else { team }
 }
 
 /// Multi-tenant ownership guard: resolves the caller's tenant and verifies it owns `project` (403
@@ -7760,7 +7847,9 @@ fn redeploy_request(
         image_cpus: None,
         image_pids: None,
         image_ports: None,
+        image_volume_path: None,
         git_token,
+        marketplace_placement: None,
     }
 }
 
@@ -7883,7 +7972,9 @@ async fn project_redeploy(
         }
         return Err((
             StatusCode::UNPROCESSABLE_ENTITY,
-            format!("The uploaded source for '{project}' is not available on a reachable node — re-upload the archive to redeploy."),
+            format!(
+                "The uploaded source for '{project}' is not available on a reachable node — re-upload the archive to redeploy."
+            ),
         ));
     }
 
@@ -7896,7 +7987,9 @@ async fn project_redeploy(
         let Some(image_ref) = image_ref else {
             return Err((
                 StatusCode::UNPROCESSABLE_ENTITY,
-                format!("The image reference for '{project}' is unavailable — redeploy from a new image."),
+                format!(
+                    "The image reference for '{project}' is unavailable — redeploy from a new image."
+                ),
             ));
         };
         let mut req = redeploy_request(
@@ -8168,7 +8261,9 @@ async fn git_webhook(
                 .into(),
         ));
     } else {
-        tracing::warn!("accepting UNSIGNED webhook delivery (GITHUB_WEBHOOK_ALLOW_UNSIGNED=1) — re-sign this hook to restore signature verification");
+        tracing::warn!(
+            "accepting UNSIGNED webhook delivery (GITHUB_WEBHOOK_ALLOW_UNSIGNED=1) — re-sign this hook to restore signature verification"
+        );
     }
 
     let event = headers
@@ -8248,7 +8343,9 @@ async fn git_webhook(
     let candidates: Vec<String> = if !c.git_index.is_empty() {
         c.git_index.projects_for(&want)
     } else {
-        tracing::warn!("git_webhook: reverse index is empty/uninitialized — falling back to a full project scan");
+        tracing::warn!(
+            "git_webhook: reverse index is empty/uninitialized — falling back to a full project scan"
+        );
         c.projects.snapshot().into_keys().collect()
     };
 
@@ -8313,7 +8410,9 @@ async fn git_webhook(
             image_cpus: None,
             image_pids: None,
             image_ports: None,
+        image_volume_path: None,
             git_token: None,
+        marketplace_placement: None,
         };
         let webhook_team = norm(&c.projects.team_of(&project)).to_string();
         let build_id = crate::git::start_build(c.clone(), req, None, Some(webhook_team))
@@ -8668,6 +8767,183 @@ async fn overview(
             "trusted_peers": c.trusted_peer_ids.read().map(|s| s.len()).unwrap_or(0),
         },
     })))
+}
+
+/// Tenant-facing security-profile contract (`GET /v1/security/posture`).
+///
+/// This is the responding node's current control-plane view, not a deployment
+/// placement decision or a fleet-wide guarantee. It intentionally exposes no
+/// peer identities, addresses, relay URLs, or negotiated session details.
+///
+/// Evidence states have the same meaning in every section:
+/// - `enabled`: backed by direct runtime evidence.
+/// - `partial`: a real protection exists, but its coverage or assurance is incomplete.
+/// - `unavailable`: the capability is known not to be enabled.
+/// - `unknown`: the evidence required for a conclusion is missing.
+///
+/// Future post-quantum `enabled` support must be driven by negotiated-handshake
+/// telemetry, never an environment flag or Cargo feature.
+#[derive(Serialize)]
+struct SecurityPostureResponse {
+    observed_at_ms: u64,
+    observer: SecurityPostureObserver,
+    post_quantum: SecurityEvidence,
+    network: SecurityEvidence,
+    isolation: IsolationEvidence,
+}
+
+#[derive(Serialize)]
+struct SecurityPostureObserver {
+    node: String,
+    region: String,
+}
+
+#[derive(Serialize)]
+struct SecurityEvidence {
+    state: SecurityEvidenceState,
+    detail: String,
+    observed_at_ms: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum SecurityEvidenceState {
+    Enabled,
+    Partial,
+    Unavailable,
+    Unknown,
+}
+
+#[derive(Serialize)]
+struct IsolationEvidence {
+    #[serde(flatten)]
+    evidence: SecurityEvidence,
+    /// Counts are derived only from this observer's fresh gossiped NodeInfo
+    /// registry; they do not identify peers or establish tenant placement.
+    backend_counts: IsolationBackendCounts,
+    observer_backend: String,
+}
+
+#[derive(Default, Serialize)]
+struct IsolationBackendCounts {
+    firecracker: usize,
+    litebox: usize,
+    mock: usize,
+    unknown: usize,
+}
+
+async fn security_posture(
+    State(c): State<Arc<CloudState>>,
+    claims: Option<axum::Extension<crate::auth::Claims>>,
+) -> Result<Json<SecurityPostureResponse>, (StatusCode, String)> {
+    require_auth_read(claims.as_ref().map(|e| &e.0))?;
+
+    let observed_at_ms = now_ms();
+    let observer = c.registry.me();
+    let mesh_running = c.iroh.read().is_some() && observer.iroh_addr.is_some();
+    let peer_trust_enforced = std::env::var("HIVE_PEER_TRUST")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+
+    let network = if mesh_running {
+        let trust = if peer_trust_enforced {
+            " Peer admission policy is configured to enforce HIVE_PEER_TRUST."
+        } else {
+            " HIVE_PEER_TRUST admission policy is not enforced."
+        };
+        SecurityEvidence {
+            // The live endpoint proves this process has Iroh transport running,
+            // but no live negotiated-handshake counter exists to certify every
+            // client or peer session.
+            state: SecurityEvidenceState::Partial,
+            detail: format!(
+                "Iroh QUIC/TLS mesh transport is running on this responding node.{trust} This report does not certify every client or peer session because negotiated-handshake telemetry is unavailable."
+            ),
+            observed_at_ms,
+        }
+    } else {
+        SecurityEvidence {
+            state: SecurityEvidenceState::Unknown,
+            detail: "No live Iroh endpoint and advertised mesh address are both available on this responding node, so transport runtime evidence is incomplete.".into(),
+            observed_at_ms,
+        }
+    };
+
+    // See docs/pqc-migration-scope.md: today's mesh key exchange is classical
+    // X25519. Dependency capability is not negotiated-handshake evidence.
+    let post_quantum = SecurityEvidence {
+        state: SecurityEvidenceState::Unavailable,
+        detail: "Public TLS and mesh transport currently use classical key exchange; hybrid ML-KEM is not enabled or observed.".into(),
+        observed_at_ms,
+    };
+
+    let nodes = c.registry.nodes();
+    let mesh_health = c.mesh_health();
+    let mut backend_counts = IsolationBackendCounts::default();
+    for node in &nodes {
+        match node.backend.as_str() {
+            "firecracker" => backend_counts.firecracker += 1,
+            "litebox" => backend_counts.litebox += 1,
+            "mock" => backend_counts.mock += 1,
+            _ => backend_counts.unknown += 1,
+        }
+    }
+    let registry_incomplete = nodes.is_empty()
+        || backend_counts.unknown > 0
+        || (mesh_health.expected_peers > 0
+            && mesh_health.audible_peers < mesh_health.expected_peers);
+    let observer_backend = observer.backend.clone();
+    let isolation_evidence = if registry_incomplete {
+        SecurityEvidence {
+            state: SecurityEvidenceState::Unknown,
+            detail: "The responding node's current mesh registry is incomplete or lacks backend evidence, so fleet isolation posture is unknown.".into(),
+            observed_at_ms,
+        }
+    } else if backend_counts.mock > 0
+        && backend_counts.firecracker == 0
+        && backend_counts.litebox == 0
+    {
+        SecurityEvidence {
+            state: SecurityEvidenceState::Unavailable,
+            detail: "Known nodes report Mock, which provides no workload isolation and is not a sandbox.".into(),
+            observed_at_ms,
+        }
+    } else if backend_counts.litebox > 0 {
+        SecurityEvidence {
+            state: SecurityEvidenceState::Partial,
+            detail: "Known nodes include Litebox, an unprivileged syscall sandbox that is not a Firecracker/gVisor-grade hardware isolation boundary. Firecracker nodes use hardware microVM isolation; Mock nodes provide no isolation.".into(),
+            observed_at_ms,
+        }
+    } else if backend_counts.firecracker > 0 && backend_counts.litebox == 0 {
+        SecurityEvidence {
+            state: SecurityEvidenceState::Enabled,
+            detail:
+                "All known production-capable nodes report Firecracker hardware microVM isolation; Mock nodes, if present, provide no workload isolation and are not a sandbox."
+                    .into(),
+            observed_at_ms,
+        }
+    } else {
+        SecurityEvidence {
+            state: SecurityEvidenceState::Partial,
+            detail: "Known nodes mix Firecracker hardware microVM isolation with Mock nodes, which provide no workload isolation and are not a sandbox.".into(),
+            observed_at_ms,
+        }
+    };
+
+    Ok(Json(SecurityPostureResponse {
+        observed_at_ms,
+        observer: SecurityPostureObserver {
+            node: c.node_name.clone(),
+            region: c.region.clone(),
+        },
+        post_quantum,
+        network,
+        isolation: IsolationEvidence {
+            evidence: isolation_evidence,
+            backend_counts,
+            observer_backend,
+        },
+    }))
 }
 
 /// Typed connectivity of `n` as THIS observer sees it, derived from signals the node already
@@ -12596,12 +12872,13 @@ async fn integrations_list(
     claims: Option<axum::Extension<crate::auth::Claims>>,
 ) -> Json<Value> {
     let t = tenant(&c, &headers, claims.as_ref().map(|e| &e.0));
-    Json(json!(c
-        .integrations
-        .list(&t)
-        .iter()
-        .map(|i| i.public())
-        .collect::<Vec<_>>()))
+    Json(json!(
+        c.integrations
+            .list(&t)
+            .iter()
+            .map(|i| i.public())
+            .collect::<Vec<_>>()
+    ))
 }
 
 async fn integration_upsert(
@@ -13687,7 +13964,7 @@ async fn database_create(
         .as_deref()
         .and_then(|region| {
             let regions = [region.to_string()];
-            crate::schedule::place(&c, &regions, true, true, false, false, false, false, None)
+            crate::schedule::place(&c, &regions, true, true, false, false, false, false, None, None)
                 .into_iter()
                 .next()
                 .map(|t| t.node)
@@ -13706,7 +13983,7 @@ async fn database_create(
             host_node = Some(c.node_name.clone());
         } else {
             host_node =
-                crate::schedule::place(&c, &[], true, true, false, false, false, false, None)
+                crate::schedule::place(&c, &[], true, true, false, false, false, false, None, None)
                     .into_iter()
                     .map(|t| t.node)
                     .find(|node| admissible(node));
@@ -14597,7 +14874,9 @@ fn write_scope(
             return match team {
                 Some(team) if !team.is_empty() => (team, true),
                 _ => {
-                    tracing::warn!("mirror write rejected: missing/invalid x-hive-mirror-tok under enforced auth");
+                    tracing::warn!(
+                        "mirror write rejected: missing/invalid x-hive-mirror-tok under enforced auth"
+                    );
                     (tenant(c, h, claims), false)
                 }
             };
@@ -15888,7 +16167,9 @@ async fn forward_mutation_to_leader(
     let Some(admin) = admin else {
         return Err((
             StatusCode::BAD_GATEWAY,
-            format!("this mutation must run on the control-plane leader '{leader}', whose admin URL this node does not know — retry via the leader"),
+            format!(
+                "this mutation must run on the control-plane leader '{leader}', whose admin URL this node does not know — retry via the leader"
+            ),
         ));
     };
     let mut req = c
@@ -16982,7 +17263,6 @@ pub(crate) async fn billing_get(
     Json(json!({
         "account": acc,
         "plans": crate::billing::PLANS,
-        "stripe": crate::billing::stripe_configured(),
         "rate_card": crate::billing::RATE_CARD,
         "limits": {
             "max_projects": crate::billing::plan_max_projects(&plan),
@@ -17205,6 +17485,78 @@ struct CheckoutReq {
 }
 fn default_kind() -> String {
     "plan".into()
+}
+
+/// Public wallet configuration. Every value comes from operator configuration:
+/// this process never holds a wallet secret and cannot sign a customer payment.
+fn theo_network() -> Result<Value, (StatusCode, String)> {
+    let chain_id = std::env::var("THEO_CHAIN_ID")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|id| *id > 0)
+        .ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "THEO_CHAIN_ID is not configured".into(),
+        ))?;
+    let rpc_url = std::env::var("THEO_RPC_URL").unwrap_or_default();
+    let token_address = std::env::var("THEO_TOKEN_ADDRESS").unwrap_or_default();
+    let treasury_address = std::env::var("THEO_TREASURY_ADDRESS").unwrap_or_default();
+    let token_decimals = std::env::var("THEO_TOKEN_DECIMALS")
+        .ok()
+        .and_then(|v| v.parse::<u8>().ok())
+        .filter(|decimals| (2..=36).contains(decimals))
+        .ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "THEO_TOKEN_DECIMALS is not configured safely".into(),
+        ))?;
+    let required_confirmations = std::env::var("THEO_REQUIRED_CONFIRMATIONS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|confirmations| *confirmations > 0)
+        .ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "THEO_REQUIRED_CONFIRMATIONS is not configured safely".into(),
+        ))?;
+    if !rpc_url.starts_with("https://")
+        || !is_evm_address(&token_address)
+        || !is_evm_address(&treasury_address)
+    {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "THEO wallet settlement is not configured safely".into(),
+        ));
+    }
+    Ok(json!({
+        "chain_id": chain_id,
+        "chain_name": std::env::var("THEO_CHAIN_NAME").unwrap_or_else(|_| "Autheo".into()),
+        "rpc_url": rpc_url,
+        "explorer_url": std::env::var("THEO_EXPLORER_URL").unwrap_or_default(),
+        "token_address": token_address,
+        "treasury_address": treasury_address,
+        "token_decimals": token_decimals,
+        "required_confirmations": required_confirmations,
+    }))
+}
+
+fn is_evm_address(value: &str) -> bool {
+    value.len() == 42
+        && value.starts_with("0x")
+        && value[2..].bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Existing catalog values are hundredths of THEO. Convert only the fixed,
+/// THEO-denominated catalog quantity to ERC-20 atomic units; never consult USD.
+fn checkout_theo_atomic(amount: u64, token_decimals: u8) -> String {
+    (u128::from(amount) * 10u128.pow(u32::from(token_decimals - 2))).to_string()
+}
+
+/// Public, tenant-authenticated wallet parameters. These are operator-owned
+/// configuration values, never browser-provided addresses or token metadata.
+async fn billing_wallet_config(
+    claims: Option<axum::Extension<crate::auth::Claims>>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    require_auth_read(claims.as_ref().map(|e| &e.0)).map_err(|e| (e.0, e.1))?;
+    Ok(Json(theo_network()?))
 }
 
 /// Which purchasable addons this fleet can actually deliver and, when it cannot, WHY: the dashboard
@@ -17435,8 +17787,12 @@ async fn billing_checkout(
         ""
     };
     let stripe = crate::billing::stripe_configured();
+    // THEO (on-chain wallet settlement) is the payment rail on a fleet with no Stripe key: it is
+    // selected only by operator configuration (`THEO_CHAIN_ID`), never by the request, and a Stripe
+    // key always wins so the two rails can never both settle one checkout.
+    let theo = !stripe && theo_configured();
     let recurring_plan = req.kind != "credits" && req.kind != "addon";
-    if !stripe && !crate::billing::mock_checkout_allowed() {
+    if !stripe && !theo && !crate::billing::mock_checkout_allowed() {
         return Err((
             StatusCode::SERVICE_UNAVAILABLE,
             "billing is not set up on this platform (no payment provider is configured): \
@@ -17497,9 +17853,56 @@ async fn billing_checkout(
             }
         }
     }
+    if theo {
+        let network = theo_network()?;
+        let token_decimals = network["token_decimals"].as_u64().ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "invalid THEO token decimals".into(),
+        ))? as u8;
+        return Ok(Json(json!({
+            "url": format!("/billing/checkout?session={}", co.id),
+            "mock": false,
+            "session": co.id,
+            "amount_theo_atomic": checkout_theo_atomic(amount, token_decimals),
+            "network": network,
+        })));
+    }
     Ok(Json(
         json!({ "url": format!("/billing/checkout?session={}", co.id), "mock": true, "session": co.id }),
     ))
+}
+
+/// Whether this node's operator configured THEO wallet settlement.
+fn theo_configured() -> bool {
+    std::env::var("THEO_CHAIN_ID").is_ok_and(|v| !v.trim().is_empty())
+}
+
+/// The last server-verified, tenant-scoped intent a client fetches before a wallet is asked to
+/// sign, so the client cannot choose its own recipient, token or amount. It changes nothing. A
+/// checkout lives in the opener's in-process map, so a local miss is answered through
+/// [`billing_checkout_get`], which proxies to the billing authority.
+async fn billing_payment_intent(
+    State(c): State<Arc<CloudState>>,
+    headers: HeaderMap,
+    claims: Option<axum::Extension<crate::auth::Claims>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let t = tenant(&c, &headers, claims.as_ref().map(|e| &e.0));
+    theo_network()?;
+    let Json(view) = billing_checkout_get(State(c.clone()), Path(id))
+        .await
+        .map_err(|s| (s, "checkout not found".to_string()))?;
+    if norm(view["tenant"].as_str().unwrap_or("")) != t {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "checkout belongs to another tenant".into(),
+        ));
+    }
+    Ok(Json(json!({
+        "session": view["id"],
+        "amount_theo_atomic": view["amount_theo_atomic"],
+        "network": view["network"],
+    })))
 }
 
 /// Reads a checkout by id. Checkouts live in an in-process map on whichever node opened them, and
@@ -17512,7 +17915,18 @@ pub(crate) async fn billing_checkout_get(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, StatusCode> {
     if let Some(co) = c.billing.get_checkout(&id) {
-        return Ok(Json(json!(co)));
+        let mut view = json!(co);
+        if theo_configured() {
+            // Additive THEO fields for the wallet checkout page; the Stripe-shaped record is
+            // otherwise unchanged.
+            let network = theo_network().map_err(|(s, _)| s)?;
+            let decimals = network["token_decimals"]
+                .as_u64()
+                .ok_or(StatusCode::SERVICE_UNAVAILABLE)? as u8;
+            view["amount_theo_atomic"] = json!(checkout_theo_atomic(co.amount_cents, decimals));
+            view["network"] = network;
+        }
+        return Ok(Json(view));
     }
     if let Some(v) = proxy_billing_read(&c, &format!("/v1/billing/checkout/{id}"), "").await {
         return Ok(Json(v));
@@ -17523,6 +17937,131 @@ pub(crate) async fn billing_checkout_get(
 #[derive(Deserialize)]
 struct ConfirmReq {
     session: String,
+    /// THEO settlement only: the paying wallet and the transfer's transaction hash.
+    #[serde(default)]
+    wallet: String,
+    #[serde(default)]
+    transaction_hash: String,
+}
+
+/// Verify the actual on-chain ERC-20 transfer before consuming a checkout.
+/// Wallets sign in-browser; this only reads a configured public RPC and checks
+/// sender, THEO contract, treasury, amount, successful receipt, and chain.
+async fn verify_theo_settlement(
+    http: &reqwest::Client,
+    checkout: &crate::billing::Checkout,
+    wallet: &str,
+    transaction_hash: &str,
+) -> Result<(), String> {
+    if !is_evm_address(wallet)
+        || transaction_hash.len() != 66
+        || !transaction_hash.starts_with("0x")
+        || !transaction_hash[2..].bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return Err("invalid wallet or transaction hash".into());
+    }
+    let network = theo_network().map_err(|(_, e)| e)?;
+    let rpc = network["rpc_url"].as_str().ok_or("missing RPC URL")?;
+    let expected_chain = network["chain_id"].as_u64().ok_or("missing chain id")?;
+    let chain = theo_rpc(http, rpc, "eth_chainId", json!([])).await?;
+    let chain = chain
+        .as_str()
+        .and_then(|v| u64::from_str_radix(v.trim_start_matches("0x"), 16).ok())
+        .ok_or("invalid RPC chain id")?;
+    if chain != expected_chain {
+        return Err("THEO RPC is on the wrong chain".into());
+    }
+    let tx = theo_rpc(
+        http,
+        rpc,
+        "eth_getTransactionByHash",
+        json!([transaction_hash]),
+    )
+    .await?;
+    let receipt = theo_rpc(
+        http,
+        rpc,
+        "eth_getTransactionReceipt",
+        json!([transaction_hash]),
+    )
+    .await?;
+    if tx.is_null() || receipt.is_null() {
+        return Err("THEO transaction is still pending".into());
+    }
+    if receipt.get("status").and_then(Value::as_str) != Some("0x1") {
+        return Err("THEO transaction failed on-chain".into());
+    }
+    let lower = |value: Option<&str>| value.unwrap_or_default().to_ascii_lowercase();
+    if lower(tx.get("from").and_then(Value::as_str)) != wallet.to_ascii_lowercase()
+        || lower(tx.get("to").and_then(Value::as_str)) != lower(network["token_address"].as_str())
+    {
+        return Err("transaction sender or THEO token contract does not match checkout".into());
+    }
+    let input = tx
+        .get("input")
+        .or_else(|| tx.get("data"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let expected_to = lower(network["treasury_address"].as_str())
+        .trim_start_matches("0x")
+        .to_string();
+    let token_decimals = network["token_decimals"]
+        .as_u64()
+        .ok_or("missing token decimals")? as u8;
+    let expected_amount = format!(
+        "{:064x}",
+        checkout_theo_atomic(checkout.amount_cents, token_decimals)
+            .parse::<u128>()
+            .map_err(|_| "invalid checkout amount")?
+    );
+    if input.len() != 138
+        || !input.starts_with("0xa9059cbb")
+        || input[34..74].to_ascii_lowercase() != format!("{expected_to:0>64}")
+        || input[74..].to_ascii_lowercase() != expected_amount
+    {
+        return Err("transaction does not transfer the exact THEO checkout amount".into());
+    }
+    let confirmations = network["required_confirmations"]
+        .as_u64()
+        .ok_or("missing confirmation policy")?;
+    let receipt_block = receipt
+        .get("blockNumber")
+        .and_then(Value::as_str)
+        .and_then(|v| u64::from_str_radix(v.trim_start_matches("0x"), 16).ok())
+        .ok_or("transaction receipt has no block number")?;
+    let tip = theo_rpc(http, rpc, "eth_blockNumber", json!([]))
+        .await?
+        .as_str()
+        .and_then(|v| u64::from_str_radix(v.trim_start_matches("0x"), 16).ok())
+        .ok_or("invalid RPC block number")?;
+    if tip.saturating_sub(receipt_block).saturating_add(1) < confirmations {
+        return Err(format!(
+            "THEO transaction is awaiting {confirmations} required confirmations"
+        ));
+    }
+    Ok(())
+}
+
+async fn theo_rpc(
+    http: &reqwest::Client,
+    rpc_url: &str,
+    method: &str,
+    params: Value,
+) -> Result<Value, String> {
+    let response = http
+        .post(rpc_url)
+        .json(&json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}))
+        .send()
+        .await
+        .map_err(|_| "THEO RPC unavailable".to_string())?;
+    let value: Value = response
+        .json()
+        .await
+        .map_err(|_| "malformed THEO RPC response".to_string())?;
+    if value.get("error").is_some() {
+        return Err("THEO RPC rejected the request".into());
+    }
+    Ok(value.get("result").cloned().unwrap_or(Value::Null))
 }
 
 /// Confirms a checkout and applies its effect. Only the SAME tenant that opened a checkout may
@@ -17556,7 +18095,42 @@ async fn billing_confirm(
     let mut stripe_customer = String::new();
     let mut stripe_subscription = String::new();
     let mut payment = crate::billing::Payment::Unproven;
-    if !co.stripe_session_id.is_empty() {
+    // THEO wallet settlement: only where the operator configured it and Stripe is not the rail.
+    // The transfer is verified on-chain (sender, token contract, treasury, exact amount, receipt,
+    // chain, confirmations) BEFORE the checkout is consumed, and a re-submission of the same
+    // transaction is an idempotent no-op rather than a second fulfilment.
+    let theo_attempt = !req.transaction_hash.is_empty() || !req.wallet.is_empty();
+    if theo_attempt && (crate::billing::stripe_configured() || !theo_configured()) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let theo_settled = theo_attempt && co.stripe_session_id.is_empty();
+    if theo_attempt && !theo_settled {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let theo_confirmation = if theo_settled {
+        verify_theo_settlement(&c.http, &co, &req.wallet, &req.transaction_hash)
+            .await
+            .map_err(|e| {
+                tracing::warn!(checkout = %co.id, error = %e, "THEO settlement verification failed");
+                StatusCode::PAYMENT_REQUIRED
+            })?;
+        let (co, acc, already_confirmed) = c
+            .billing
+            .confirm_theo_checkout(&req.session, &req.transaction_hash)
+            .map_err(|reason| {
+                tracing::warn!(checkout = %req.session, %reason, "THEO checkout confirmation refused");
+                StatusCode::CONFLICT
+            })?;
+        if already_confirmed {
+            return Ok(Json(
+                json!({ "ok": true, "already_confirmed": true, "account": acc }),
+            ));
+        }
+        Some((co, acc))
+    } else {
+        None
+    };
+    if !theo_settled && !co.stripe_session_id.is_empty() {
         let status = crate::billing::stripe_verify_session(&c.http, &co.stripe_session_id)
             .await
             .map_err(|e| { tracing::warn!(error=%e, session=%co.stripe_session_id, "stripe session verification failed"); StatusCode::BAD_GATEWAY })?;
@@ -17567,10 +18141,13 @@ async fn billing_confirm(
         stripe_subscription = status.subscription.unwrap_or_default();
         payment = crate::billing::Payment::Stripe;
     }
-    let (co, acc) = match c.billing.confirm_checkout(&req.session, payment) {
-        Ok(done) => done,
-        Err(crate::billing::Unconfirmed::Unknown) => return Err(StatusCode::NOT_FOUND),
-        Err(crate::billing::Unconfirmed::Unpaid) => return Err(StatusCode::PAYMENT_REQUIRED),
+    let (co, acc) = match theo_confirmation {
+        Some(done) => done,
+        None => match c.billing.confirm_checkout(&req.session, payment) {
+            Ok(done) => done,
+            Err(crate::billing::Unconfirmed::Unknown) => return Err(StatusCode::NOT_FOUND),
+            Err(crate::billing::Unconfirmed::Unpaid) => return Err(StatusCode::PAYMENT_REQUIRED),
+        },
     };
     let mut addon_error: Option<String> = None;
     match co.kind.as_str() {
@@ -17594,12 +18171,19 @@ async fn billing_confirm(
         "charge",
         "billing",
         &co.id,
-        &format!(
-            "checkout {} {} ${:.2}",
-            co.kind,
-            co.plan,
-            co.amount_cents as f64 / 100.0
-        ),
+        &if theo_settled {
+            format!(
+                "THEO checkout {} {} {} hundredths of THEO (tx {})",
+                co.kind, co.plan, co.amount_cents, co.theo_transaction_hash
+            )
+        } else {
+            format!(
+                "checkout {} {} ${:.2}",
+                co.kind,
+                co.plan,
+                co.amount_cents as f64 / 100.0
+            )
+        },
     );
     crate::persist::persist(&c);
     Ok(Json(
@@ -17636,7 +18220,9 @@ async fn billing_webhook(
 ) -> Result<StatusCode, StatusCode> {
     let secret = std::env::var("STRIPE_WEBHOOK_SECRET").unwrap_or_default();
     if secret.is_empty() {
-        tracing::warn!("stripe webhook received but STRIPE_WEBHOOK_SECRET is not configured — rejecting (fail closed)");
+        tracing::warn!(
+            "stripe webhook received but STRIPE_WEBHOOK_SECRET is not configured — rejecting (fail closed)"
+        );
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
     let sig = headers
@@ -18124,7 +18710,12 @@ async fn data_create(
     require_operator(claims.as_ref().map(|e| &e.0))?;
     let t = tenant(&c, &headers, claims.as_ref().map(|e| &e.0));
     if all_collections(&c).iter().any(|(n, _)| *n == collection) {
-        return Err((StatusCode::CONFLICT, format!("'{collection}' is a managed collection — create custom docs in a new collection name")));
+        return Err((
+            StatusCode::CONFLICT,
+            format!(
+                "'{collection}' is a managed collection — create custom docs in a new collection name"
+            ),
+        ));
     }
     let doc = c.docs.create(&collection, &t, body);
     c.audit
@@ -18209,7 +18800,7 @@ async fn data_delete(
             return Err((
                 StatusCode::BAD_REQUEST,
                 format!("'{collection}' rows are managed and can't be deleted here"),
-            ))
+            ));
         }
     };
     if !ok {
@@ -18610,7 +19201,10 @@ mod identity_sync_tests {
         let (tenant2, _org2, is_owner2) =
             resolve_identity_sync(false, None, None, None, "user_x", false);
         assert!(!is_owner2);
-        assert_eq!(tenant2, "personal", "unenforced personal-scope default is still literal \"personal\" (pre-existing dev behavior)");
+        assert_eq!(
+            tenant2, "personal",
+            "unenforced personal-scope default is still literal \"personal\" (pre-existing dev behavior)"
+        );
     }
 }
 
@@ -18678,25 +19272,29 @@ sub      A      9.9.9.9
 "#;
         let recs = parse_zone(zone, "example.com");
         // apex A
-        assert!(recs
-            .iter()
-            .any(|r| r.kind == "A" && r.name.is_empty() && r.value == "76.76.21.21"));
+        assert!(
+            recs.iter()
+                .any(|r| r.kind == "A" && r.name.is_empty() && r.value == "76.76.21.21")
+        );
         // www CNAME (trailing dot stripped)
-        assert!(recs
-            .iter()
-            .any(|r| r.kind == "CNAME" && r.name == "www" && r.value == "app.example.com"));
+        assert!(
+            recs.iter()
+                .any(|r| r.kind == "CNAME" && r.name == "www" && r.value == "app.example.com")
+        );
         // MX with priority
         let mx = recs.iter().find(|r| r.kind == "MX").expect("mx");
         assert_eq!(mx.priority, Some(10));
         assert_eq!(mx.value, "mail.example.com");
         // TXT keeps content (quotes stripped)
-        assert!(recs
-            .iter()
-            .any(|r| r.kind == "TXT" && r.value.contains("v=spf1")));
+        assert!(
+            recs.iter()
+                .any(|r| r.kind == "TXT" && r.value.contains("v=spf1"))
+        );
         // minimal "name TYPE value" form
-        assert!(recs
-            .iter()
-            .any(|r| r.kind == "A" && r.name == "sub" && r.value == "9.9.9.9"));
+        assert!(
+            recs.iter()
+                .any(|r| r.kind == "A" && r.name == "sub" && r.value == "9.9.9.9")
+        );
     }
 
     #[test]

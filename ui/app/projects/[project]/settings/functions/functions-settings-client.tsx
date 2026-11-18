@@ -84,7 +84,7 @@ export function FunctionsSettings({ paramsPromise }: { paramsPromise: Promise<{ 
     <div className="flex flex-col gap-6">
       <SettingCard
         title="Fluid Compute"
-        desc="Enable Fluid compute for your functions to automatically manage concurrency and optimize performance. OpenEdge handles the defaults to ensure the best experience for your workload."
+        desc="Enable Fluid compute for your functions to automatically manage concurrency and optimize performance. DevHub handles the defaults to ensure the best experience for your workload."
         footer="A new deployment is required for changes to take effect."
         footerAction={<a className="text-sm text-link hover:underline" href="/usage">View Fluid compute metrics →</a>}
       >
@@ -179,7 +179,7 @@ export function FunctionsSettings({ paramsPromise }: { paramsPromise: Promise<{ 
       </SettingCard>
       <SettingCard
         title="Deployment Regions"
-        desc="The regions on the OpenEdge network where this project is deployed — every deployment (functions, containers, or static) is placed on the nodes in the regions you select, and requests are routed to the nearest one. Leave empty to deploy automatically to the eligible region nearest you. Select up to 5; redeploy for changes to take effect."
+        desc="The regions on the DevHub network where this project is deployed — every deployment (functions, containers, or static) is placed on the nodes in the regions you select, and requests are routed to the nearest one. Leave empty to deploy automatically to the eligible region nearest you. Select up to 5; redeploy for changes to take effect."
         footer={`${fs.regions.length}/5 regions selected${fs.regions.length === 0 ? " — auto (nearest region)" : ""}`}
       >
         <div className="mx-auto mb-6 w-1/2">

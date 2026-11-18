@@ -52,10 +52,13 @@ self.addEventListener("fetch", (event) => {
   // them and the connect flow dies with no error.
   if (url.pathname.startsWith("/cloud") || url.pathname.startsWith("/api") || url.pathname.startsWith("/oauth")) return;
 
-  // Page navigations: network-first, fall back to cache, then the offline page.
+  // Page navigations: force a network revalidation before the offline fallback.
+  // A default fetch is still allowed to satisfy a navigation from the browser's
+  // HTTP cache, which can keep a dashboard document on a retired skin even
+  // though this worker itself is network-first.
   if (req.mode === "navigate") {
     event.respondWith(
-      fetch(req).catch(() => caches.match(req).then((c) => c || caches.match("/offline.html")))
+      fetch(req, { cache: "reload" }).catch(() => caches.match(req).then((c) => c || caches.match("/offline.html")))
     );
     return;
   }

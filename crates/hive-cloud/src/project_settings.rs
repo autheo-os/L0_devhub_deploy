@@ -221,6 +221,62 @@ pub struct ContainerSettings {
     pub volume_mount_path: Option<String>,
 }
 
+/// Dashboard-managed GAME SERVER configuration (bn-game-server-mods) — the
+/// persisted equivalent of a fluid.json `game` block, following the exact
+/// `container`/`browser_db` sync discipline: presence is the opt-in, the
+/// dashboard PUT is one source, and a fluid.json declaration always wins on
+/// the next build. Only meaningful for a project whose deployment runs a
+/// `container` function (game servers — Minecraft & co. — are raw-TCP/UDP
+/// containers). All fields optional; `None` = "platform default" per field.
+///
+/// Two capabilities live here:
+///  1. MODS/PLUGINS FROM THE DRIVE: `mods_drive_path` names a folder in the
+///     project's shadw Drive (`/v1/drive/:project/*`); at deploy time every
+///     file in it is copied into the container's persistent volume at
+///     `mods_dest_subdir` (`game_mods::sync_drive_mods`), so e.g. an
+///     itzg/minecraft-server with the volume at `/data` picks up
+///     `/data/mods/*.jar` on the next start — no image rebuild.
+///  2. VERSION CONTROL: `game_version`/`server_type` pin the server's
+///     version (stamped as `VERSION`/`TYPE` env for itzg-style images, only
+///     where the manifest/compose file did not already declare them), and
+///     `world_snapshot_on_deploy` snapshots the world directory of the
+///     persistent volume before each deploy (`game_mods::snapshot_world`),
+///     giving a per-build rollback point for the save.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GameServerSettings {
+    /// Drive folder whose files are this server's mods/plugins, e.g. "/mods".
+    /// Empty/None = no Drive sync. The folder must already exist in the
+    /// project's Drive (upload jars there from the dashboard's Drive page).
+    #[serde(default)]
+    pub mods_drive_path: Option<String>,
+    /// Directory INSIDE the persistent volume the Drive files land in, e.g.
+    /// "mods" or "plugins" — relative to the volume root (`/data` for the
+    /// itzg minecraft image). Default "mods".
+    #[serde(default)]
+    pub mods_dest_subdir: Option<String>,
+    /// Game version pin, e.g. "1.21.4" — stamped onto container functions as
+    /// the `VERSION` env var (the itzg convention) when the manifest does not
+    /// already set one. Never overrides an explicitly declared value.
+    #[serde(default)]
+    pub game_version: Option<String>,
+    /// Server type/flavor, e.g. "PAPER", "FORGE", "FABRIC" — stamped as the
+    /// `TYPE` env var with the same never-override rule.
+    #[serde(default)]
+    pub server_type: Option<String>,
+    /// When true, `game_mods::snapshot_world` copies the world dir
+    /// (`world_subdir`, default "world") of the persistent volume to
+    /// `.hive-snapshots/<build_id>/` inside the same volume before each
+    /// deploy's files are touched — a rollback point per build. Snapshots are
+    /// never pruned automatically (retention is a policy decision, not
+    /// something a deploy does silently).
+    #[serde(default)]
+    pub world_snapshot_on_deploy: bool,
+    /// World directory inside the volume that `world_snapshot_on_deploy`
+    /// snapshots — default "world" (Minecraft Java's main overworld dir).
+    #[serde(default)]
+    pub world_subdir: Option<String>,
+}
+
 /// A minted REST/Hrana credential for a project's `browser_db` replica: shown once at mint time,
 /// stored only as its SHA-256 hash, checked constant-time by `browser_db_rest::credential_scope`. A
 /// plain bearer token, separate from the QUIC admission lease `browser_admission` issues for the
@@ -295,6 +351,12 @@ pub struct ProjectSettings {
     /// opt-in; an explicit fluid.json `container` block always wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<ContainerSettings>,
+    /// Dashboard-managed game-server config (mods-from-Drive + version
+    /// control) — see [`GameServerSettings`]. Same `Option` discipline as
+    /// `container`/`inference`: presence is the opt-in, applies on the NEXT
+    /// deploy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game: Option<GameServerSettings>,
     /// The project's paid dedicated IPv4 allocation (`tencent_eip::provision_from_checkout`),
     /// attached to a function only while `FunctionSettings::dedicated_ipv4` is on (`git.rs`).
     /// `None` until purchased; kept across redeploys so the same address is re-adopted instead of a
@@ -445,6 +507,7 @@ impl Default for ProjectSettings {
             browser_db_rest_team: None,
             browser_db_rest_public: None,
             container: None,
+            game: None,
             dedicated_ipv4: None,
             domains: Vec::new(),
             team: default_team(),
@@ -1792,6 +1855,23 @@ impl ProjectStore {
         self.touch(&mut m, project).container = spec;
     }
 
+    /// See [`ProjectSettings::game`]. `None` clears the dashboard-managed
+    /// config (the `set_container` precedent) — it changes nothing already
+    /// deployed; the NEXT deploy stops syncing/snapshotting.
+    pub fn set_game(&self, project: &str, spec: Option<GameServerSettings>) {
+        let mut m = self.map.write();
+        self.touch(&mut m, project).game = spec;
+    }
+
+    pub fn set_game_exact(
+        &self,
+        project: &str,
+        expected: fluid_core::ProjectIncarnation,
+        spec: Option<GameServerSettings>,
+    ) -> Result<(), ProjectIncarnationError> {
+        self.mutate_exact(project, expected, |row| row.game = spec)
+    }
+
     /// See [`ProjectSettings::dedicated_ipv4`]. Called once per project by
     /// `tencent_eip::provision_from_checkout`: this row IS the durable idempotency claim
     /// (replicated through `store_sync::REGISTRY`'s "projects" entry), so a second confirmation is
@@ -2283,7 +2363,15 @@ fn upsert_env(row: &mut ProjectSettings, mut value: EnvVar) {
         _ => "runtime",
     }
     .to_string();
-    if !value.sensitive && looks_like_secret(&value.value) {
+    // Image-deploy env maps do not carry a client sensitive flag. Force game
+    // credentials through encrypted/masked storage by key, not token shape.
+    let game_secret = matches!(
+        value.key.trim().to_ascii_uppercase().as_str(),
+        "PASSWORD" | "STEAM_LOGIN" | "BETA_ACCESSCODE" | "DISCORD_WEBHOOK_URL" | "STEAM_USER" | "STEAM_PASSWORD" | "STEAM_BRANCH_PASSWORD" | "SERVER_PASS"
+            | "SERVER_PASSWORD" | "ADMIN_PASSWORD" | "RCON_PASSWORD" | "SUPERVISOR_HTTP_PASS"
+            | "GES_PASSWORD" | "GES_RCON_PASSWORD" | "DST_CLUSTER_TOKEN" | "SERVER_TOKEN" | "STV_PASSWORD"
+    );
+    if !value.sensitive && (game_secret || looks_like_secret(&value.value)) {
         value.sensitive = true;
     }
     if value.value.is_empty() {

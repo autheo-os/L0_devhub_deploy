@@ -121,6 +121,9 @@ const RULES: &[Rule] = &[
     // re-decides a role) plus `admin::require_operator` in the handler makes it operator-only;
     // `roles::gate` short-circuits for platform_admin so the floor never blocks the operator.
     rule(GET, "/v1/admin/contract/explorer", Role::Admin),
+    // Marketplace operator view: eligible deployments and allocation records. ADMIN floor here plus
+    // `admin::require_operator` in `marketplace::operator_view` makes it operator-only.
+    rule(GET, "/v1/admin/marketplace", Role::Admin),
     rule(POST, "/v1/domains/:domain/import", Role::Admin),
     rule(PUT, "/v1/domains/:domain/nameservers", Role::Admin),
     rule(POST, "/v1/domains/:domain/records", Role::Admin),
@@ -175,6 +178,9 @@ const RULES: &[Rule] = &[
     rule(POST, "/v1/domains/:domain/verify", Role::Member),
     rule(PUT, "/v1/projects/:project/build", Role::Member),
     rule(WRITES, "/v1/projects/:project/container", Role::Member),
+    // Game-server settings (Drive mods folder, version pins, world snapshots): the same deploy-input
+    // settings class as the container block, so the same member floor.
+    rule(WRITES, "/v1/projects/:project/game", Role::Member),
     rule(PUT, "/v1/projects/:project/cron-enabled", Role::Member),
     rule(PUT, "/v1/projects/:project/functions", Role::Member),
     rule(PUT, "/v1/projects/:project/git-ci", Role::Member),

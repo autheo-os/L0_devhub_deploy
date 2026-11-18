@@ -98,23 +98,61 @@ Environment=HIVE_HEALTH_FAIL_THRESHOLD={{ hive_health_fail_threshold | default(2
 Environment=HIVE_OWNER_EMAIL={{ hive_owner_email }}
 Environment=HIVE_ADMIN_EMAILS={{ hive_admin_emails | default('') }}
 Environment=HIVE_PUBLIC_NODE_TENANTS={{ hive_public_node_tenants | default('thoth-division') }}
-Environment=HIVE_JWT_SECRET={{ vault_hive_jwt_secret }}
-Environment=HIVE_INTERNAL_TOKEN={{ vault_hive_internal_token }}
-{% if vault_stripe_secret_key %}
+
+EnvironmentFile=/etc/hive/hive-secrets.env
+
+{% if hive_marketplace_settlement_profile | default('') %}
+Environment=HIVE_MARKETPLACE_SETTLEMENT_PROFILE={{ hive_marketplace_settlement_profile }}
+{% endif %}
+{% if hive_marketplace_testnet_atomic_split_audited | default(false) %}
+Environment=HIVE_MARKETPLACE_TESTNET_ATOMIC_SPLIT_AUDITED=1
+{% endif %}
+{% if hive_marketplace_testnet_configuration_reference | default('') %}
+Environment=HIVE_MARKETPLACE_TESTNET_CONFIGURATION_REFERENCE={{ hive_marketplace_testnet_configuration_reference }}
+{% endif %}
+{% if hive_marketplace_project | default('') and hive_marketplace_gateway_listen | default('') %}
+Environment=HIVE_MARKETPLACE_PROJECT={{ hive_marketplace_project }}
+Environment=HIVE_MARKETPLACE_GATEWAY_HOST={{ hive_marketplace_gateway_host | default('devhub-marketplace.internal') }}
+Environment=HIVE_MARKETPLACE_GATEWAY_LISTEN={{ hive_marketplace_gateway_listen }}
+Environment=HIVE_MARKETPLACE_GATEWAY_TLS_CERT={{ hive_marketplace_gateway_tls_cert }}
+Environment=HIVE_MARKETPLACE_GATEWAY_TLS_KEY={{ hive_marketplace_gateway_tls_key }}
+Environment=HIVE_MARKETPLACE_GATEWAY_CA_CERT={{ hive_marketplace_gateway_ca_cert }}
+Environment=HIVE_MARKETPLACE_GATEWAY_CLIENT_CA={{ hive_marketplace_gateway_client_ca }}
+Environment=HIVE_MARKETPLACE_CA_CERT=/etc/hive/marketplace-ca/ca.crt
+Environment=HIVE_MARKETPLACE_CA_KEY=/etc/hive/marketplace-ca/ca.key
+{% endif %}
+
+{% if vault_stripe_secret_key | default('') %}
 Environment=STRIPE_SECRET_KEY={{ vault_stripe_secret_key }}
 {% endif %}
-{% if vault_github_webhook_secret %}
+{% if vault_github_webhook_secret | default('') %}
 Environment=GITHUB_WEBHOOK_SECRET={{ vault_github_webhook_secret }}
 {% endif %}
-{% if vault_hive_secret_key %}
+{% if vault_hive_secret_key | default('') %}
 Environment=HIVE_SECRET_KEY={{ vault_hive_secret_key }}
 {% endif %}
-{% if vault_tencentcloud_secret_id and hive_tencent_region is defined and hive_tencent_instance_id is defined %}
+{# Dedicated public IPv4 addon (tencent_eip.rs): all three of these must be
+   present together or the node's own preflight() check correctly reports the
+   feature unavailable rather than half-configuring it. Credentials are
+   shared fleet-wide (one Tencent account); region + instance id are THIS
+   node's own real Tencent Cloud identity and must never be templated from a
+   shared/default value -- see hosts.ini's per-host hive_tencent_region /
+   hive_tencent_instance_id comment for how they were derived (live
+   DescribeInstances matched by this node's own public IP, not guessed). A
+   host with neither var set (e.g. a non-Tencent-hosted node) gets none of
+   this block, which is the correct "not available on this fleet yet" state
+   for that host specifically. #}
+
+{% if (vault_tencentcloud_secret_id | default('')) and
+      (vault_tencentcloud_secret_key | default('')) and
+      (hive_tencent_region is defined) and
+      (hive_tencent_instance_id is defined) %}
 Environment=TENCENTCLOUD_SECRET_ID={{ vault_tencentcloud_secret_id }}
 Environment=TENCENTCLOUD_SECRET_KEY={{ vault_tencentcloud_secret_key }}
 Environment=HIVE_TENCENT_EIP_REGION={{ hive_tencent_region }}
 Environment=HIVE_TENCENT_CVM_INSTANCE_ID={{ hive_tencent_instance_id }}
 {% endif %}
+
 ExecStart={{ hive_binary_path }} --region {{ hive_region }} --name {{ hive_name }} --listen {{ hive_listen }} --admin {{ hive_admin }}{% for p in (hive_extra_peers | default([])) %} --peer {{ p }}{% endfor %}
 
 WorkingDirectory={{ hive_src_dir }}

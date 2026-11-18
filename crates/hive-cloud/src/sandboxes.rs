@@ -627,7 +627,7 @@ pub trait SandboxProvider: Send + Sync {
     async fn start_sandbox(&self, project_id: &str, id: &str)
         -> Result<SandboxRecord, SandboxError>;
     async fn stop_sandbox(&self, project_id: &str, id: &str)
-        -> Result<SandboxRecord, SandboxError>;
+    -> Result<SandboxRecord, SandboxError>;
     async fn delete_sandbox(&self, project_id: &str, id: &str) -> Result<(), SandboxError>;
     async fn run_command(
         &self,
@@ -1173,16 +1173,20 @@ mod tests {
 
     #[test]
     fn network_policy_validation() {
-        assert!(validate_network_policy(&NetworkPolicy {
-            mode: "allow-all".into(),
-            ..Default::default()
-        })
-        .is_ok());
-        assert!(validate_network_policy(&NetworkPolicy {
-            mode: "deny-all".into(),
-            ..Default::default()
-        })
-        .is_ok());
+        assert!(
+            validate_network_policy(&NetworkPolicy {
+                mode: "allow-all".into(),
+                ..Default::default()
+            })
+            .is_ok()
+        );
+        assert!(
+            validate_network_policy(&NetworkPolicy {
+                mode: "deny-all".into(),
+                ..Default::default()
+            })
+            .is_ok()
+        );
         assert_eq!(
             validate_network_policy(&NetworkPolicy {
                 mode: "allowlist".into(),
@@ -1192,29 +1196,37 @@ mod tests {
             .code(),
             "SANDBOX_INVALID_NETWORK_POLICY"
         );
-        assert!(validate_network_policy(&NetworkPolicy {
-            mode: "allowlist".into(),
-            allowed_domains: vec!["api.example.com".into()],
-            ..Default::default()
-        })
-        .is_ok());
-        assert!(validate_network_policy(&NetworkPolicy {
-            mode: "allowlist".into(),
-            allowed_subnets: vec!["not-a-cidr".into()],
-            ..Default::default()
-        })
-        .is_err());
-        assert!(validate_network_policy(&NetworkPolicy {
-            mode: "allowlist".into(),
-            allowed_subnets: vec!["10.0.0.0/8".into()],
-            ..Default::default()
-        })
-        .is_ok());
-        assert!(validate_network_policy(&NetworkPolicy {
-            mode: "bogus".into(),
-            ..Default::default()
-        })
-        .is_err());
+        assert!(
+            validate_network_policy(&NetworkPolicy {
+                mode: "allowlist".into(),
+                allowed_domains: vec!["api.example.com".into()],
+                ..Default::default()
+            })
+            .is_ok()
+        );
+        assert!(
+            validate_network_policy(&NetworkPolicy {
+                mode: "allowlist".into(),
+                allowed_subnets: vec!["not-a-cidr".into()],
+                ..Default::default()
+            })
+            .is_err()
+        );
+        assert!(
+            validate_network_policy(&NetworkPolicy {
+                mode: "allowlist".into(),
+                allowed_subnets: vec!["10.0.0.0/8".into()],
+                ..Default::default()
+            })
+            .is_ok()
+        );
+        assert!(
+            validate_network_policy(&NetworkPolicy {
+                mode: "bogus".into(),
+                ..Default::default()
+            })
+            .is_err()
+        );
     }
 
     #[test]
@@ -1424,8 +1436,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(updated.network_policy.mode, "allowlist");
-        assert!(p
-            .update_network_policy(
+        assert!(
+            p.update_network_policy(
                 "proj-a",
                 &rec.id,
                 NetworkPolicy {
@@ -1434,7 +1446,8 @@ mod tests {
                 }
             )
             .await
-            .is_err());
+            .is_err()
+        );
     }
 
     #[tokio::test]

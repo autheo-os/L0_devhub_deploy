@@ -812,7 +812,9 @@ async fn account(
             EnvelopeOpen::Opened(c) => {
                 if let Some(env) = seal_account(&c) {
                     if !write_account_sealed(&env) {
-                        tracing::warn!("adopted the replicated ACME account but could not write the local sealed cache");
+                        tracing::warn!(
+                            "adopted the replicated ACME account but could not write the local sealed cache"
+                        );
                     }
                 }
                 found = Some(("replicated store", c));
@@ -984,7 +986,7 @@ async fn issue(
             if authz.status == AuthorizationStatus::Valid {
                 continue;
             }
-            let mut challenge = authz
+            let challenge = authz
                 .challenge(ChallengeType::Dns01)
                 .ok_or_else(|| anyhow::anyhow!("no dns-01 challenge offered"))?;
             let host = challenge.identifier().to_string();

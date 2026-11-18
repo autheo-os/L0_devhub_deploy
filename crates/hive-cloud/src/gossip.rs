@@ -200,6 +200,21 @@ async fn dispatch_verified(
     signer: Option<&str>,
 ) -> Vec<u8> {
     match path {
+        // Private Marketplace container gateway.  Its envelope retains the
+        // original HMAC headers and raw body; `mesh_dispatch` reconstructs an
+        // ordinary request into the Marketplace router so the destination
+        // consumes the nonce exactly once.
+        "/v1/marketplace/gateway-mesh" if method == hive_p2p::GOSSIP_POST => {
+            let request =
+                serde_json::from_slice::<crate::marketplace_gateway::MarketplaceMeshRequest>(body);
+            match request {
+                Ok(request) => crate::marketplace::mesh_dispatch(cloud.clone(), request)
+                    .await
+                    .and_then(|response| serde_json::to_vec(&response).ok())
+                    .unwrap_or_default(),
+                Err(_) => Vec::new(),
+            }
+        }
         "/v1/nodes/announce" if method == hive_p2p::GOSSIP_POST => {
             if let Ok(node) = serde_json::from_slice::<hive_edge::NodeInfo>(body) {
                 return jb(
@@ -739,6 +754,35 @@ async fn dispatch_verified(
                 .map(|v| crate::zkauth::urldecode(&v))
                 .unwrap_or_default();
             jb(crate::zkauth::mint_rpc(&team, &user, &project).await)
+        }
+        // Catalog artifact bytes are a separate immutable-materialization
+        // protocol, never a deployment fanout. Exact bounded ranges let a
+        // target verify package bytes before they can become executable.
+        p if method == hive_p2p::GOSSIP_GET
+            && p.starts_with("/v1/devhub/runtime-artifacts/v1/")
+            && p.split('?').next().is_some_and(|path| path.ends_with("/package")) =>
+        {
+            let path = p.split('?').next().unwrap_or_default();
+            let digest = path
+                .strip_prefix("/v1/devhub/runtime-artifacts/v1/")
+                .and_then(|value| value.strip_suffix("/package"))
+                .unwrap_or_default();
+            let offset = qparam(p, "offset")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(u64::MAX);
+            let length = qparam(p, "length")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0);
+            let token = qparam(p, "tok");
+            crate::artifact_catalog_transfer::mesh_dispatch(
+                cloud,
+                digest,
+                signer,
+                token.as_deref(),
+                offset,
+                length,
+            )
+            .await
         }
         // Bounded immutable runtime-artifact transfer. The exact versioned paths must stay ahead of
         // every broader runtime/deploy arm: an old peer answers an unknown path with an empty body,
