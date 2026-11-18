@@ -307,12 +307,12 @@ export default function UsageView() {
             <span>Product</span><span className="text-right">Usage</span><span className="text-right">Charge</span>
           </div>
 
-          <GroupHeader name="OpenEdge Delivery Network" />
+          <GroupHeader name="DevHub Delivery Network" />
           <Row color="bg-fg" name="Edge Requests" spark={edgeS} usage={fmtMeasured(requests)} charge={rowCharge(edgeCharge)} />
           <Row color="bg-fg/70" name="Cache Hits" spark={cacheS} usage={fmtMeasured(cacheHits)} charge={Number.NaN} />
           <Row color="bg-fg/40" name="Firewall — Blocked Requests" spark={blockedS} usage={fmtMeasured(blocked)} charge={rowCharge(wafCharge)} />
 
-          <GroupHeader name="OpenEdge Functions (Fluid · Active CPU pricing)" />
+          <GroupHeader name="DevHub Functions (Fluid · Active CPU pricing)" />
           <Row color="bg-fg/20" name="Function Invocations" spark={[]} usage={fmtMeasured(invocations)} charge={Number.NaN} />
           <Row color="bg-fg/20" name="Active CPU" spark={[]} usage={unitMeasured(activeCpuMs === null ? null : activeCpuMs / 1000, 1, "s")} charge={rowCharge(cpuCharge)} />
           <Row color="bg-teal-500" name="Provisioned Memory" spark={[]} usage={unitMeasured(memGbHrs, 3, "GB-hr")} charge={rowCharge(memCharge)} />

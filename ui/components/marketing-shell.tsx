@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Menu, X } from "lucide-react";
-import Image from "next/image";
 import "@/components/landing/landing.css";
 
 const ELECTROLIZE_FONT = "var(--font-electrolize), ui-sans-serif, system-ui, sans-serif";
@@ -32,10 +31,10 @@ const FOOTER_COLS: { title: string; links: { label: string; href: string }[] }[]
     title: "Compare",
     links: [
       { label: "All comparisons", href: "/compare" },
-      { label: "shadw vs Vercel", href: "/compare/vercel" },
-      { label: "shadw vs Railway", href: "/compare/railway" },
-      { label: "shadw vs Fly.io", href: "/compare/fly-io" },
-      { label: "shadw vs Cloudflare", href: "/compare/cloudflare" },
+      { label: "autheo vs Vercel", href: "/compare/vercel" },
+      { label: "autheo vs Railway", href: "/compare/railway" },
+      { label: "autheo vs Fly.io", href: "/compare/fly-io" },
+      { label: "autheo vs Cloudflare", href: "/compare/cloudflare" },
     ],
   },
   {
@@ -57,7 +56,12 @@ const FOOTER_COLS: { title: string; links: { label: string; href: string }[] }[]
 ];
 
 function Logo({ className = "h-6 sm:h-7" }: { className?: string }) {
-  return <Image src="/shadw-logo-wordmark.png" alt="shadw" width={1826} height={407} priority className={`${className} w-auto max-w-none shrink-0 select-none`} />;
+  return (
+    <span aria-label="Autheo DevHub" className={`inline-flex shrink-0 items-center font-display font-bold tracking-tight text-white ${className}`} style={{ lineHeight: 1 }}>
+      autheo<span className="text-emerald-400">.dev</span>
+      <span className="ml-2 text-[0.42em] uppercase tracking-[0.2em] text-emerald-300/90">DevHub</span>
+    </span>
+  );
 }
 
 const MARKETING_SURFACE_COLOR = "#000000";
@@ -279,12 +283,12 @@ export function MarketingShell({ children, lead }: { children: React.ReactNode; 
               fontSize: "clamp(7rem, 30vw, 28rem)",
               opacity: 0.16,
               transform: "translateY(12%)",
-              backgroundImage: "linear-gradient(100deg, #e92a67 0%, #2a8af6 30%, #a853ba 60%, #e92a67 100%)",
+              backgroundImage: "linear-gradient(100deg, #34d399 0%, #22c55e 30%, #84cc16 60%, #86efac 100%)",
               maskImage: "linear-gradient(to top, black 30%, transparent 95%)",
               WebkitMaskImage: "linear-gradient(to top, black 30%, transparent 95%)",
             }}
           >
-            shadw
+            autheo
           </span>
         </div>
         <div className="relative z-10 mx-auto max-w-[1500px] px-6 pt-14 lg:px-10">
@@ -312,7 +316,7 @@ export function MarketingShell({ children, lead }: { children: React.ReactNode; 
           </div>
 
           <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-white/10 pt-6 sm:flex-row">
-            <span className="text-sm text-zinc-400">© 2026 shadw. All rights reserved.</span>
+            <span className="text-sm text-zinc-400">© 2026 Autheo DevHub. All rights reserved.</span>
           </div>
           <div className="h-40 sm:h-56" />
         </div>

@@ -63,7 +63,7 @@ export function Bento() {
           <div className="flex flex-col justify-center p-7 lg:col-span-4 lg:p-10">
             <h3 className="lp-card-title !text-[28px]">Own your cloud</h3>
             <p className="lp-card-copy mt-3 max-w-[400px]">
-              Use the hosted platform, or run shadw on machines you operate.
+              Use the hosted platform, or run autheo on machines you operate.
             </p>
           </div>
           <div className="relative h-[230px] sm:h-[290px] lg:col-span-8 lg:h-[400px]">

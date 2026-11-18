@@ -19,6 +19,8 @@ import { useProjects, projectState, type ProjectEntry } from "@/lib/projects";
 import { timeAgo } from "@/lib/utils";
 import { deploymentHost, deploymentSelfAlias } from "@/lib/deploy-url";
 import { RawPortsBadge } from "@/components/raw-port-connections";
+import { SecurityProfileBanner } from "@/components/security-profile";
+import { OpeningSplash } from "@/components/opening-splash";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type View = "grid" | "list";
@@ -74,7 +76,14 @@ export function Dashboard() {
   const shown = list.slice(safePage * pageSize, safePage * pageSize + pageSize);
 
   return (
+    <>
+    {/* A refresh always starts with the shared opening splash; it is guarded at module scope, so auth settling cannot replay it within one load. */}
+    <OpeningSplash />
     <div className="pb-24">
+      <h1 className="mb-6 text-3xl font-semibold tracking-tight text-accent sm:text-4xl">
+        Autheo Development Hub
+      </h1>
+      <SecurityProfileBanner />
       <div className="mb-6 flex items-center gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
@@ -167,6 +176,7 @@ export function Dashboard() {
         </div>
       </div>
     </div>
+    </>
   );
 }
 

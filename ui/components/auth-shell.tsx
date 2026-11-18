@@ -39,7 +39,7 @@ export function AuthShell({
           }}
         />
         <div className="relative flex min-w-0 items-center">
-          <Link href="/" aria-label="shadw home" className="tap-44 inline-flex shrink-0 items-center"><Logo className="h-6 w-auto max-w-none sm:h-7" /></Link>
+          <Link href="/" aria-label="Autheo DevHub home" className="tap-44 inline-flex shrink-0 items-center"><Logo className="h-6 w-auto max-w-none sm:h-7" /></Link>
         </div>
         <div className="relative">
           <h1 className="max-w-md text-3xl font-semibold leading-tight tracking-tight">
@@ -59,13 +59,13 @@ export function AuthShell({
             ))}
           </ul>
         </div>
-        <div className="relative text-xs text-muted">© {2026} shadw</div>
+        <div className="relative text-xs text-muted">© {2026} Autheo DevHub</div>
       </div>
 
       <div className="relative flex flex-col items-center justify-center px-4 py-10">
         <div className="absolute right-4 top-4"><ThemeToggle /></div>
         <div className="mb-6 flex min-w-0 items-center lg:hidden">
-          <Link href="/" aria-label="shadw home" className="tap-44 inline-flex shrink-0 items-center"><Logo className="h-5 w-auto max-w-none sm:h-6" /></Link>
+          <Link href="/" aria-label="Autheo DevHub home" className="tap-44 inline-flex shrink-0 items-center"><Logo className="h-5 w-auto max-w-none sm:h-6" /></Link>
         </div>
         <div className="w-full min-w-0 max-w-[400px]">
           {mounted && render(clerkAppearance(dark))}

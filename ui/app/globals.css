@@ -3,33 +3,33 @@
 @tailwind utilities;
 
 :root {
-  --background: 0 0% 98%;
-  --subtle: 0 0% 98%;
-  --card: 0 0% 100%;
-  --foreground: 0 0% 4%;
-  --secondary: 0 0% 40%;
-  --muted: 0 0% 56%;
-  --border: 0 0% 92%;
-  --border-strong: 0 0% 80%;
-  --accent: 0 0% 0%;
+  --background: 120 38% 98%;
+  --subtle: 120 30% 96%;
+  --card: 0 0% 100%; /* cards/components stay pure white */
+  --foreground: 140 42% 8%;
+  --secondary: 140 22% 34%;
+  --muted: 140 14% 45%;
+  --border: 130 24% 86%;
+  --border-strong: 130 20% 72%;
+  --accent: 132 93% 32%;
   --accent-foreground: 0 0% 100%;
-  --link: 212 100% 47%;
-  --green: 145 80% 42%;
+  --link: 134 86% 34%;
+  --green: 132 93% 32%;
 }
 
 .dark {
-  --background: 0 0% 4%;
-  --subtle: 0 0% 8%;
-  --card: 0 0% 7%;
-  --foreground: 0 0% 93%;
-  --secondary: 0 0% 63%;
-  --muted: 0 0% 50%;
-  --border: 0 0% 16%;
-  --border-strong: 0 0% 28%;
-  --accent: 0 0% 100%;
-  --accent-foreground: 0 0% 4%;
-  --link: 212 100% 62%;
-  --green: 145 65% 49%;
+  --background: 144 44% 5%;
+  --subtle: 145 32% 9%;
+  --card: 145 30% 8%;
+  --foreground: 130 40% 94%;
+  --secondary: 130 22% 72%;
+  --muted: 132 12% 62%;
+  --border: 140 28% 19%;
+  --border-strong: 140 22% 30%;
+  --accent: 132 96% 49%;
+  --accent-foreground: 144 44% 5%;
+  --link: 132 96% 62%;
+  --green: 132 96% 49%;
 }
 
 @media (prefers-contrast: more) {
@@ -64,31 +64,168 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* The workshop illustration is the light dashboard's shared hero canvas, not
+   just the public landing's decoration. Cover keeps the stencil full-bleed at
+   every viewport size, matching the Marketplace surface rather than leaving
+   the artwork in a narrow centered column. The fine grid keeps empty portions
+   of the workspace legible. `hero-stencil-day` is byte-identical to the
+   original source artwork; the dedicated night asset preserves its composition
+   while recoloring the same stencil for a dark canvas. */
 body {
   background-image:
+    url("/images/hero-stencil-day.png"),
     linear-gradient(to right, hsl(var(--foreground) / 0.01) 1px, transparent 1px),
     linear-gradient(to bottom, hsl(var(--foreground) / 0.01) 1px, transparent 1px);
-  background-size: 140px 140px;
-  background-position: -1px -1px;
+  background-size: cover, 140px 140px, 140px 140px;
+  background-position: center 4rem, -1px -1px, -1px -1px;
+  background-repeat: no-repeat, repeat, repeat;
   background-attachment: fixed;
 }
 .dark body {
   background-image:
+    radial-gradient(ellipse at 72% 54%, rgb(0 255 136 / 0.075), transparent 46%),
+    url("/images/hero-stencil-night.png"),
     linear-gradient(to right, hsl(var(--foreground) / 0.015) 1px, transparent 1px),
     linear-gradient(to bottom, hsl(var(--foreground) / 0.015) 1px, transparent 1px);
+  background-size: cover, cover, 140px 140px, 140px 140px;
+  background-position: center, center 4rem, -1px -1px, -1px -1px;
+  background-repeat: no-repeat, no-repeat, repeat, repeat;
+}
+
+/* ---- Digital network Earth ----
+   The host establishes a square layout box. Its SVG has a square viewBox and
+   `preserveAspectRatio`, preventing flex/grid parents from ever stretching the
+   globe's silhouette at responsive widths. */
+.globe-3d {
+  --globe-cyan: #35dcff;
+  --globe-blue: #1688ff;
+  --globe-node: #9cf4ff;
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  min-width: 0;
+  isolation: isolate;
+}
+.globe-3d-art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 0 18px rgb(22 136 255 / .2));
+}
+.globe-3d-aura {
+  fill: none;
+  stroke: var(--globe-blue);
+  stroke-width: .65;
+  opacity: .52;
+  filter: drop-shadow(0 0 5px rgb(53 220 255 / .7));
+  transform-origin: 50px 50px;
+  animation: globe-aura 7s ease-in-out infinite alternate;
+}
+.globe-3d-base { opacity: 1; }
+.globe-3d-grid {
+  fill: none;
+  stroke: #267dab;
+  stroke-width: .18;
+  opacity: .2;
+}
+.globe-3d-coasts {
+  fill: none;
+  stroke: var(--globe-cyan);
+  stroke-width: .4;
+  stroke-linejoin: round;
+  opacity: .9;
+  filter: drop-shadow(0 0 1.5px rgb(53 220 255 / .72));
+}
+.globe-3d-borders {
+  fill: none;
+  stroke: #218ec3;
+  stroke-width: .16;
+  opacity: .38;
+}
+.globe-3d-network {
+  fill: none;
+  stroke: #249ee8;
+  stroke-width: .36;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: .82;
+}
+.globe-3d-long-link {
+  stroke: var(--globe-cyan);
+  stroke-width: .26;
+  stroke-dasharray: .9 1.75;
+  opacity: .34;
+}
+.globe-3d-node {
+  fill: var(--globe-node);
+  stroke: var(--globe-cyan);
+  stroke-width: .16;
+  transform-origin: center;
+  filter: drop-shadow(0 0 1.5px rgb(53 220 255 / .95));
+  animation: globe-node-pulse 3.6s ease-in-out infinite;
+}
+.globe-3d-node-1 { animation-delay: -.9s; opacity: .65; }
+.globe-3d-node-2 { animation-delay: -1.7s; opacity: .5; }
+.globe-3d-node-3 { animation-delay: -2.5s; opacity: .72; }
+.globe-3d-secondary-node {
+  fill: #66dfff;
+  opacity: .42;
+}
+.globe-3d-rim {
+  fill: none;
+  stroke: var(--globe-cyan);
+  stroke-width: .7;
+  opacity: .82;
+  filter: drop-shadow(0 0 4px rgb(53 220 255 / .75));
+}
+.globe-3d-card .globe-3d-art { filter: drop-shadow(0 0 12px rgb(22 136 255 / .16)); }
+.globe-3d-card .globe-3d-network { opacity: .48; }
+.globe-3d-hero .globe-3d-grid { opacity: .28; }
+.globe-3d-hero .globe-3d-network { opacity: .88; }
+@keyframes globe-node-pulse { 0%, 100% { opacity: .42; } 50% { opacity: 1; } }
+@keyframes globe-aura { from { opacity: .38; transform: scale(.985); } to { opacity: .62; transform: scale(1.015); } }
+@media (prefers-reduced-motion: reduce) {
+  .globe-3d-grid,
+  .globe-3d-node,
+  .globe-3d-aura {
+    animation: none;
+  }
 }
 
 * {
   border-color: hsl(var(--border));
 }
 
+/* Theme and interaction colors transition as one visual system. */
 button,
 a,
 input,
 select {
   transition-property: color, background-color, border-color, opacity, box-shadow;
-  transition-duration: 120ms;
+  transition-duration: 240ms;
   transition-timing-function: ease;
+}
+
+html,
+body,
+header,
+main,
+footer,
+section,
+article,
+aside,
+form,
+[role="dialog"] {
+  transition-property: color, background-color, border-color;
+  transition-duration: 240ms;
+  transition-timing-function: ease;
+}
+
+:focus-visible {
+  outline: 2px solid hsl(var(--accent));
+  outline-offset: 2px;
 }
 
 ::selection {
@@ -101,6 +238,25 @@ html {
 }
 html.dark {
   color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html,
+  body,
+  header,
+  main,
+  footer,
+  section,
+  article,
+  aside,
+  form,
+  [role="dialog"],
+  button,
+  a,
+  input,
+  select {
+    transition-duration: 0.01ms;
+  }
 }
 
 ::-webkit-scrollbar {

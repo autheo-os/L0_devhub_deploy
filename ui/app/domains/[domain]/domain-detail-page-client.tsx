@@ -60,7 +60,7 @@ export function DomainDetailPage({ paramsPromise }: { paramsPromise: Promise<{ d
         {!attached && <Meta label="Registrar" value={<NotAvailable />} />}
         {!attached && <Meta label="Auto Renewal" value={<NotAvailable />} />}
         <Meta label="Age" value={timeAgo(d.created_ms)} />
-        <Meta label="OpenEdge CDN" value={d.cdn_active ? <span className="flex items-center gap-1.5 text-emerald-500"><ShieldCheck className="h-4 w-4" /> Active</span> : "Inactive"} />
+        <Meta label="DevHub CDN" value={d.cdn_active ? <span className="flex items-center gap-1.5 text-emerald-500"><ShieldCheck className="h-4 w-4" /> Active</span> : "Inactive"} />
       </div>
 
       {d.verify && (

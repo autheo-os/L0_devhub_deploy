@@ -115,7 +115,7 @@ export async function GET(req: NextRequest) {
   }
   const range = req.headers.get("range");
   const headers = {
-    "user-agent": "Mozilla/5.0 (compatible; shadw-tv/1.0)",
+    "user-agent": "Mozilla/5.0 (compatible; autheo-tv/1.0)",
     accept: "*/*",
     "accept-encoding": "identity",
     ...(range && SINGLE_RANGE.test(range) ? { range } : {}),

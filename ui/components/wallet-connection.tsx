@@ -84,8 +84,12 @@ export function WalletConnectionButton() {
   const [network, setNetwork] = useState<TheoNetwork | null>(null);
   const [message, setMessage] = useState("");
 
+  // A node that settles in USD has no wallet-config: the button is then absent rather than a dead control.
+  const [configured, setConfigured] = useState(true);
   useEffect(() => {
-    apiGet<TheoNetwork>("/v1/billing/wallet-config").then(setNetwork).catch(() => setNetwork(null));
+    apiGet<TheoNetwork>("/v1/billing/wallet-config")
+      .then((n) => { setNetwork(n); setConfigured(true); })
+      .catch(() => { setNetwork(null); setConfigured(false); });
   }, []);
 
   async function select(id: WalletProviderId) {
@@ -106,6 +110,7 @@ export function WalletConnectionButton() {
     }
   }
 
+  if (!configured) return null;
   const networkLabel = network && wallet.chainId === network.chain_id ? network.chain_name : wallet.chainId === null ? "Network unknown" : `Wrong network (${wallet.chainId})`;
   return (
     <div className="relative">

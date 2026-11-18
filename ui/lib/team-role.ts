@@ -15,6 +15,10 @@ export const TEAM_ACTIONS = {
   "account.2fa.enroll": { floor: "viewer", routes: ["POST /v1/account/2fa/enroll"] },
   "account.2fa.confirm": { floor: "viewer", routes: ["POST /v1/account/2fa/confirm"] },
   "account.2fa.disable": { floor: "viewer", routes: ["POST /v1/account/2fa/disable"] },
+  /** Game-server settings (Drive mods folder, version pins, world snapshots): `roles.rs` lists `WRITES /v1/projects/:project/game` at the member floor, the same class as the container block. */
+  "game.settings": { floor: "member", routes: ["PUT /v1/projects/:project/game", "DELETE /v1/projects/:project/game"] },
+  /** Marketplace operator view: `roles.rs` ADMIN floor, plus `admin::require_operator` in the handler, so only a platform operator gets data. */
+  "marketplace.operator": { floor: "admin", routes: ["GET /v1/admin/marketplace"] },
   "enterprise.project": { floor: "member", routes: ["POST /v1/enterprise/microfrontends", "DELETE /v1/enterprise/microfrontends/:id", "POST /v1/enterprise/conformance/run"] },
   "webhooks.write": { floor: "admin", routes: ["POST /v1/webhooks", "DELETE /v1/webhooks/:id", "POST /v1/projects/:project/webhooks"] },
   "integrations.write": { floor: "admin", routes: ["POST /v1/integrations", "DELETE /v1/integrations/:id"] },

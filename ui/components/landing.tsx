@@ -6,6 +6,7 @@ import { MarketingShell } from "@/components/marketing-shell";
 import { IntroLoader } from "@/components/landing/intro-loader";
 import { PauseSkip } from "@/components/landing/motion-pause";
 import { Hero } from "@/components/landing/hero";
+import { MarketplaceBand } from "@/components/landing/marketplace";
 import { StackStrip } from "@/components/landing/stack-strip";
 import { HowItWorks } from "@/components/landing/how-it-works";
 import { Bento } from "@/components/landing/bento";
@@ -27,6 +28,7 @@ export function Landing() {
       <div ref={root} className="lp">
         <Hero />
         <MarqueeBanner />
+        <MarketplaceBand />
         <StackStrip />
         <HowItWorks />
         <Bento />

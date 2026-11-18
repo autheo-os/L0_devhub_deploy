@@ -527,7 +527,7 @@ export function GitOps() {
 
                 <p className="text-sm text-secondary">
                   GitHub connected{statusNote ? " (status check unavailable)" : ""}. We&apos;ll generate the
-                  OpenEdge spec, configs &amp; meta artifacts and commit them to a repo.
+                  DevHub spec, configs &amp; meta artifacts and commit them to a repo.
                 </p>
 
                 <div className="mt-4 grid grid-cols-2 gap-2">
@@ -625,7 +625,7 @@ export function GitOps() {
                   <div className="mt-2 flex flex-col gap-1.5">
                     <p className="text-xs text-secondary">
                       This organization restricts third-party OAuth apps. An org owner must approve
-                      OpenEdge (members can request it), then re-check access.
+                      DevHub (members can request it), then re-check access.
                     </p>
                     <div className="flex flex-wrap items-center gap-3">
                       <a

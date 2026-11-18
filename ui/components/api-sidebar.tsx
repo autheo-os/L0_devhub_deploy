@@ -41,7 +41,7 @@ export function ApiSidebar() {
   return (
     <nav aria-label="API reference">
       <Link href="/docs" className="tap-44 mb-4 flex items-center gap-1.5 px-3 text-sm text-secondary hover:text-fg">
-        <ChevronLeft className="h-4 w-4" /> shadw REST API
+        <ChevronLeft className="h-4 w-4" /> autheo REST API
       </Link>
 
       <Link

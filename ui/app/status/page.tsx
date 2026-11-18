@@ -117,14 +117,14 @@ export default function StatusPage() {
       <div className="mx-auto max-w-3xl px-5 py-10 sm:py-14">
         <div className="mb-8 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <Link href="/" aria-label="shadw home" className="tap-44 inline-flex items-center justify-center">
+            <Link href="/" aria-label="autheo home" className="tap-44 inline-flex items-center justify-center">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-fg text-bg">
                 <svg width="13" height="11" viewBox="0 0 24 22" aria-hidden><path d="M12 0 L24 22 L0 22 Z" fill="currentColor" /></svg>
               </span>
             </Link>
             <div>
-              <h1 className="text-base font-semibold leading-tight">shadw Status</h1>
-              <div className="text-xs text-muted">Incidents declared by shadw</div>
+              <h1 className="text-base font-semibold leading-tight">autheo Status</h1>
+              <div className="text-xs text-muted">Incidents declared by autheo</div>
             </div>
           </div>
           <div className="flex items-center gap-1.5 text-xs text-muted">

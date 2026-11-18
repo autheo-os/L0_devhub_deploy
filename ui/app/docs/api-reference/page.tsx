@@ -6,11 +6,11 @@ import { API_BASE, API_CATEGORIES, endpointHref, totalEndpoints } from "@/lib/ap
 
 export const metadata: Metadata = pageMeta({
   title: "REST API Reference — Docs",
-  socialTitle: "REST API Reference — shadw Docs",
+  socialTitle: "REST API Reference — autheo Docs",
   description:
-    "Reference for the shadw REST API: authenticate with team-bound API keys or short-lived JWTs, scope requests to a team, handle rate limits and HTTP error codes, and browse the documented endpoints for deployments, projects, domains, DNS, webhooks, teams, tokens and observability.",
+    "Reference for the autheo REST API: authenticate with team-bound API keys or short-lived JWTs, scope requests to a team, handle rate limits and HTTP error codes, and browse the documented endpoints for deployments, projects, domains, DNS, webhooks, teams, tokens and observability.",
   twitterDescription:
-    "Reference for the shadw REST API: authenticate with API keys or JWTs, handle rate limits and error codes, and browse the documented endpoints for deployments, projects, domains, DNS, webhooks, teams, tokens and observability.",
+    "Reference for the autheo REST API: authenticate with API keys or JWTs, handle rate limits and error codes, and browse the documented endpoints for deployments, projects, domains, DNS, webhooks, teams, tokens and observability.",
   path: "/docs/api-reference",
 });
 
@@ -43,12 +43,12 @@ export default function ApiReferencePage() {
         <div className="mb-6 flex items-center gap-2 text-sm text-secondary">
           <span>APIs &amp; SDKs</span>
           <span className="text-muted">/</span>
-          <span className="font-medium text-fg">shadw REST API</span>
+          <span className="font-medium text-fg">autheo REST API</span>
         </div>
 
         <h1 className="text-4xl font-bold tracking-tight">Using the REST API</h1>
         <p className="mt-6 text-[15px] leading-relaxed text-secondary">
-          Interact programmatically with your shadw cloud using direct HTTP requests. You can create
+          Interact programmatically with your autheo cloud using direct HTTP requests. You can create
           deployments, manage custom domains and DNS, configure projects, and wire up webhooks, all
           over HTTPS.
         </p>

@@ -10,7 +10,7 @@ import {
 import { publicOrigin, oauthStateCookieDomain, secureCookie } from "@/lib/origin";
 import { sameOriginPath } from "@/lib/same-origin-path";
 
-/** OAuth callback for the first-party GitHub App (the URL registered on the App, https://shadw.cloud/oauth/github/callback): verifies the signed CSRF state, exchanges the
+/** OAuth callback for the first-party GitHub App (the URL registered on the App, https://autheo.dev/oauth/github/callback): verifies the signed CSRF state, exchanges the
  *  code for a user token, seals it into the encrypted httpOnly cookie and returns to the page the user started on with `?connected=github`, the contract the Composio flow
  *  used. Every failure returns to that SAME page with a human-readable `github_error` that the pages render, never a raw 500 or credential material. */
 export async function GET(req: NextRequest) {

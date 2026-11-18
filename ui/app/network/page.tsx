@@ -5,6 +5,7 @@ import { Globe2, Server, Share2, ShieldCheck, Database, Network, Boxes } from "l
 import { Card, Badge, Button, PageHeader, Table, Th, Td } from "@/components/ui";
 import { RoleGate } from "@/components/role-gate";
 import { apiSend, usePoll, type NodeInfo, type AnycastTable, type RateLimitStats } from "@/lib/api";
+import { isPostQuantumProtected, SecurityProfile, useSecurityPosture } from "@/components/security-profile";
 import { SATELLITE_ONLINE_COLOR, SATELLITE_DEGRADED_COLOR } from "@/components/region-map";
 import type { BrowserPresence } from "@/lib/run-node-client";
 import { timeAgo } from "@/lib/utils";
@@ -27,6 +28,13 @@ export default function NetworkPage() {
   const { data: nodes } = usePoll<NodeInfo[]>("/v1/nodes", 10000);
   const { data: cluster } = usePoll<ClusterStatus>("/v1/cluster", 10000);
   const { data: presenceFeed } = usePoll<{ presence: BrowserNode[] }>("/v1/browser/presence", 8000);
+  const { data: securityData, error: securityError, loading: securityLoading } = useSecurityPosture();
+  // A failed or incompatible posture response is not retained as usable
+  // evidence. It must not make the mesh look PQ-protected or even observed.
+  const securityPosture = securityError ? null : securityData;
+  const postQuantumProtected = isPostQuantumProtected(securityPosture);
+  const irohObserved = securityPosture?.network?.state === "enabled"
+    || securityPosture?.network?.state === "partial";
   const presence = presenceFeed?.presence ?? [];
   const regions = Array.from(new Set((nodes ?? []).map((n) => n.region))).sort();
   const fleetCount = nodes ? nodes.length : null;
@@ -54,7 +62,20 @@ export default function NetworkPage() {
           }
         />
         <Stat icon={<Globe2 className="h-4 w-4" />} label="Regions" value={regions.length || "—"} />
-        <Stat icon={<Share2 className="h-4 w-4" />} label="Transport" value="iroh QUIC" />
+        <Stat
+          icon={<Share2 className="h-4 w-4" />}
+          label="Transport"
+          value={postQuantumProtected
+            ? <>Iroh QUIC &mdash; Post-quantum protected</>
+            : irohObserved
+              ? <>Iroh QUIC &mdash; Locked</>
+              : <>Iroh QUIC &mdash; evidence unavailable</>}
+          hint={postQuantumProtected
+            ? securityPosture?.post_quantum?.detail
+            : irohObserved
+              ? "Classical TLS/QUIC transport; post-quantum protection is not yet enabled."
+              : "Security posture evidence is currently unavailable from this control plane."}
+        />
         <Stat icon={<Database className="h-4 w-4" />} label="State store" value="replicated" />
       </div>
 
@@ -139,6 +160,12 @@ export default function NetworkPage() {
         Join another MacBook to the mesh:{" "}
         <code className="font-mono text-xs">hive-cloud --region fra1 --name node-b --peer http://&lt;this-ip&gt;:8786</code>
       </Card>
+
+      <SecurityProfile
+        posture={securityPosture}
+        error={securityError}
+        loading={securityLoading}
+      />
     </div>
   );
 }
@@ -530,7 +557,7 @@ function Stat({
   return (
     <Card className="flex flex-col gap-1">
       <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted">{icon}{label}</span>
-      <span className="text-2xl font-semibold text-fg">{value}</span>
+      <span className="text-xl font-semibold text-fg">{value}</span>
       {hint ? <span className="text-xs text-secondary">{hint}</span> : null}
     </Card>
   );

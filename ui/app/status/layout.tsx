@@ -2,8 +2,8 @@ import { pageMeta } from "@/lib/page-meta";
 
 export const metadata = pageMeta({
   title: "Status",
-  socialTitle: "Status — shadw",
-  description: "Incidents declared by shadw, as the incident feed reports them.",
+  socialTitle: "Status — autheo",
+  description: "Incidents declared by autheo, as the incident feed reports them.",
   path: "/status",
 });
 

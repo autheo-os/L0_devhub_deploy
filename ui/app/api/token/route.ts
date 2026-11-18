@@ -7,6 +7,18 @@ const ADMIN = process.env.HIVE_ADMIN || "http://127.0.0.1:8786";
 const INTERNAL = process.env.HIVE_INTERNAL_TOKEN || "";
 const clerkEnabled = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || !!process.env.CLERK_SECRET_KEY;
 
+/** Development minting may only reach a local Admin listener. This keeps a
+ * developer's bypass flags from becoming credentials for a remote/private
+ * environment through a copied `HIVE_ADMIN` value. */
+function localAdminUpstream(): boolean {
+  try {
+    const host = new URL(ADMIN).hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
 /** Reads the `platform_admin` claim from the JWT the backend just minted (unverified: this server trusts its own backend);
  *  `null` = undecodable or absent = UNKNOWN, never "not an operator". */
 function jwtPlatformAdmin(token: string): boolean | null {
@@ -88,7 +100,10 @@ export async function POST(req: NextRequest) {
     ...(otp ? { otp } : {}),
   };
   if (!clerkEnabled) {
-    const devMint = process.env.HIVE_AUTH_BYPASS === "1" && process.env.NODE_ENV !== "production";
+    const devMint =
+      process.env.HIVE_AUTH_BYPASS === "1" &&
+      process.env.NODE_ENV !== "production" &&
+      localAdminUpstream();
     if (!devMint) {
       return NextResponse.json({ ok: false, reason: "clerk-disabled" });
     }
