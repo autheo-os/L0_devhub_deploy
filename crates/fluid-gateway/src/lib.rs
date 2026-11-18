@@ -588,7 +588,6 @@ pub struct StagedDeployment {
     gateway: Arc<Gateway>,
     info: DeploymentInfo,
     receipt: Option<DeploymentReadinessReceipt>,
-    publish_production: Option<bool>,
     armed: bool,
 }
 
@@ -612,9 +611,7 @@ impl StagedDeployment {
             .receipt
             .take()
             .ok_or_else(|| anyhow::anyhow!("staged deployment has no readiness receipt"))?;
-        let info = self
-            .gateway
-            .publish_staged_ready(&self.info.id, self.publish_production)?;
+        let info = self.gateway.publish_staged_ready(&self.info.id)?;
         self.armed = false;
         Ok((info, receipt))
     }
@@ -1054,8 +1051,6 @@ impl Gateway {
             production,
             String::new(),
             project_incarnation,
-            None,
-            None,
         )?;
         staged.prove_ready().await?;
         let (info, _) = staged.publish_ready()?;
@@ -1171,7 +1166,6 @@ impl Gateway {
             tenant,
             None,
             true,
-            None,
         )
     }
 
@@ -1190,38 +1184,6 @@ impl Gateway {
         tenant: String,
         project_incarnation: ProjectIncarnation,
     ) -> DeploymentInfo {
-        self.deploy_full_with_runtime_exact_marketplace(
-            host_static_root,
-            runtime_workdir,
-            manifest,
-            creator,
-            git,
-            production,
-            state,
-            tenant,
-            project_incarnation,
-            None,
-        )
-    }
-
-    /// Exact-incarnation deployment registration with a previously validated,
-    /// immutable Marketplace placement snapshot. Only the server-side DevHub
-    /// Marketplace consumer supplies this; callers cannot mutate it after this
-    /// point because it is copied directly into the deployment record.
-    #[allow(clippy::too_many_arguments)]
-    pub fn deploy_full_with_runtime_exact_marketplace(
-        &self,
-        host_static_root: String,
-        runtime_workdir: Option<String>,
-        manifest: Manifest,
-        creator: String,
-        git: Option<fluid_core::GitSource>,
-        production: bool,
-        state: fluid_core::DeployState,
-        tenant: String,
-        project_incarnation: ProjectIncarnation,
-        marketplace_placement: Option<fluid_core::MarketplacePlacementSnapshot>,
-    ) -> DeploymentInfo {
         self.deploy_full_with_runtime_incarnation(
             host_static_root,
             runtime_workdir,
@@ -1233,7 +1195,6 @@ impl Gateway {
             tenant,
             Some(project_incarnation),
             true,
-            marketplace_placement,
         )
     }
 
@@ -1260,35 +1221,6 @@ impl Gateway {
             production,
             tenant,
             Some(project_incarnation),
-            None,
-            None,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn stage_full_with_runtime_exact_marketplace(
-        self: &Arc<Self>,
-        host_static_root: String,
-        runtime_workdir: Option<String>,
-        manifest: Manifest,
-        creator: String,
-        git: Option<fluid_core::GitSource>,
-        production: bool,
-        tenant: String,
-        project_incarnation: ProjectIncarnation,
-        marketplace_placement: Option<fluid_core::MarketplacePlacementSnapshot>,
-    ) -> anyhow::Result<StagedDeployment> {
-        self.stage_full_with_runtime_incarnation(
-            host_static_root,
-            runtime_workdir,
-            manifest,
-            creator,
-            git,
-            production,
-            tenant,
-            Some(project_incarnation),
-            marketplace_placement,
-            Some(production),
         )
     }
 
@@ -1303,8 +1235,6 @@ impl Gateway {
         production: bool,
         tenant: String,
         project_incarnation: Option<ProjectIncarnation>,
-        marketplace_placement: Option<fluid_core::MarketplacePlacementSnapshot>,
-        publish_production: Option<bool>,
     ) -> anyhow::Result<StagedDeployment> {
         anyhow::ensure!(
             self.state.lock().accepting,
@@ -1321,7 +1251,6 @@ impl Gateway {
             tenant,
             project_incarnation,
             false,
-            marketplace_placement,
         );
         if info.state != fluid_core::DeployState::Building {
             self.discard_unpublished_record(&info.id);
@@ -1334,7 +1263,6 @@ impl Gateway {
             gateway: self.clone(),
             info,
             receipt: None,
-            publish_production,
             armed: true,
         })
     }
@@ -1352,7 +1280,6 @@ impl Gateway {
         tenant: String,
         project_incarnation: Option<ProjectIncarnation>,
         publish_routes: bool,
-        marketplace_placement: Option<fluid_core::MarketplacePlacementSnapshot>,
     ) -> DeploymentInfo {
         let tenant = if tenant.trim().is_empty() {
             "personal".to_string()
@@ -1426,7 +1353,6 @@ impl Gateway {
                 "preview".into()
             },
             tenant,
-            marketplace_placement,
         };
         let info = view_of(&dep);
         if build_output_refused {
@@ -1518,38 +1444,12 @@ impl Gateway {
         Some(keys)
     }
 
-    fn publish_staged_ready(
-        &self,
-        id: &DeploymentId,
-        publish_production: Option<bool>,
-    ) -> anyhow::Result<DeploymentInfo> {
+    fn publish_staged_ready(&self, id: &DeploymentId) -> anyhow::Result<DeploymentInfo> {
         let mut st = self.state.lock();
         anyhow::ensure!(
             st.accepting,
             "gateway shutdown began before staged deployment publication"
         );
-        let (project, incarnation, has_production) = {
-            let deployment = st
-                .deployments
-                .get(id)
-                .ok_or_else(|| anyhow::anyhow!("staged deployment {id} no longer exists"))?;
-            anyhow::ensure!(
-                deployment.state == fluid_core::DeployState::Building,
-                "deployment {id} is not a staged candidate"
-            );
-            let has_production = st.deployments.values().any(|existing| {
-                existing.id != *id
-                    && existing.project == deployment.project
-                    && existing.state == fluid_core::DeployState::Ready
-                    && existing.production
-                    && existing.project_incarnation == deployment.project_incarnation
-            });
-            (
-                deployment.project.clone(),
-                deployment.project_incarnation,
-                has_production,
-            )
-        };
         let info = {
             let deployment = st
                 .deployments
@@ -1560,38 +1460,11 @@ impl Gateway {
                 "deployment {id} is not a staged candidate"
             );
             deployment.state = fluid_core::DeployState::Ready;
-            deployment.production = publish_production == Some(true);
+            deployment.production = false;
             view_of(deployment)
         };
-        if publish_production == Some(true) {
-            for deployment in st.deployments.values_mut() {
-                if deployment.project == project && deployment.project_incarnation == incarnation {
-                    deployment.production = deployment.id == *id;
-                }
-            }
-        }
-        let old_production = st.aliases.get(&project).cloned().filter(|old| {
-            incarnation.is_none_or(|incarnation| {
-                st.deployments
-                    .get(old)
-                    .is_some_and(|deployment| deployment.project_incarnation == Some(incarnation))
-            })
-        });
         insert_deploy_aliases(&mut st, id);
         st.default.get_or_insert_with(|| id.clone());
-        if publish_production.is_some() && (publish_production == Some(true) || !has_production) {
-            st.aliases.insert(project, id.clone());
-            if let Some(old) = old_production {
-                if old != *id {
-                    for alias in st.aliases_full.values_mut() {
-                        if *alias == old {
-                            *alias = id.clone();
-                        }
-                    }
-                }
-            }
-        }
-        let info = st.deployments.get(id).map(view_of).unwrap_or(info);
         Ok(info)
     }
 
@@ -2344,7 +2217,6 @@ impl Gateway {
                 target: d.target.clone(),
                 state: d.state,
                 tenant: d.tenant.clone(),
-                marketplace_placement: d.marketplace_placement.clone(),
             })
             .collect()
     }
@@ -2426,7 +2298,6 @@ impl Gateway {
                 rec.target
             },
             tenant: restored_tenant,
-            marketplace_placement: rec.marketplace_placement,
         };
         let project = dep.project.clone();
         let static_root = static_files::StaticRoot::open(&dep.root).ok();
@@ -5423,7 +5294,6 @@ mod route_policy_tests {
             production: true,
             target: "production".into(),
             tenant: String::new(),
-            marketplace_placement: None,
         }
     }
 

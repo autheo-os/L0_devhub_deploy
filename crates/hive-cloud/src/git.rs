@@ -154,11 +154,7 @@ impl BuildStore {
             }
         }
     }
-    /// Append one line to a build's log. `pub(crate)` so sibling modules whose
-    /// deploy-time work produces tenant-visible diagnostics (e.g.
-    /// `game_mods`'s Drive-sync gaps) can name them in the same build log
-    /// instead of only in the node journal.
-    pub(crate) fn log(&self, id: &str, line: impl Into<String>) {
+    fn log(&self, id: &str, line: impl Into<String>) {
         if let Some(b) = self.map.lock().get_mut(id) {
             let mut line: String = line.into();
             if line.len() > MAX_BUILD_LOG_LINE_BYTES {
@@ -1334,12 +1330,6 @@ pub async fn start_build(
     admission_team: Option<String>,
 ) -> anyhow::Result<String> {
     validate_deploy_source(&req)?;
-    if let Some(path) = req.image_volume_path.as_deref() {
-        anyhow::ensure!(
-            req.image_ref.is_some() && valid_image_volume_path(path),
-            "invalid image volume mount path"
-        );
-    }
     let id = format!("dpl-{}", &Uuid::new_v4().simple().to_string()[..10]);
     let project = req
         .project
@@ -1369,17 +1359,6 @@ pub async fn start_build(
                 }
                 crate::project_settings::ProjectClaimError::Incarnation(error) => error.into(),
             })?;
-    }
-    if let Some(path) = req.image_volume_path.as_deref() {
-        let mut settings = cloud
-            .projects
-            .get_exact(&project, incarnation)?
-            .container
-            .unwrap_or_default();
-        if settings.volume_mount_path.is_none() {
-            settings.volume_mount_path = Some(path.to_owned());
-            cloud.projects.set_container_exact(&project, incarnation, Some(settings))?;
-        }
     }
     if let Some(root) = req
         .root_dir
@@ -2429,53 +2408,6 @@ fn build_isolation_unavailable_message(
     )
 }
 
-/// Extract the only Marketplace policy input Hive is allowed to consume:
-/// authoritative node registry identifiers. Policy retrieval, Clerk
-/// authentication, tenant derivation, and schema validation happen in DevHub's
-/// server-only route; Hive must neither accept identity material nor refetch.
-///
-/// This defensive re-check protects CLI/internal paths from treating an
-/// incomplete Marketplace marker as an ordinary deployment. It intentionally
-/// does not relax to a local-node fallback: an absent eligible approved node is
-/// a placement refusal.
-fn marketplace_approved_nodes(
-    req: &GitDeployRequest,
-) -> anyhow::Result<Option<std::collections::HashSet<String>>> {
-    let Some(snapshot) = req.marketplace_placement.as_ref() else {
-        return Ok(None);
-    };
-    anyhow::ensure!(
-        snapshot.contract_version == 1 && snapshot.policy_version == 1,
-        "MARKETPLACE_POLICY_INVALID: unsupported Marketplace policy version"
-    );
-    anyhow::ensure!(
-        !snapshot.marketplace_order_id.trim().is_empty()
-            && !snapshot.buyer_tenant_id.trim().is_empty(),
-        "MARKETPLACE_POLICY_INVALID: Marketplace order and buyer tenant are required"
-    );
-    anyhow::ensure!(
-        snapshot.policy.is_object(),
-        "MARKETPLACE_POLICY_INVALID: Marketplace policy snapshot is malformed"
-    );
-    let approved: std::collections::HashSet<String> = snapshot
-        .approved_node_ids
-        .iter()
-        .filter(|id| {
-            !id.is_empty()
-                && id.len() <= 128
-                && id
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
-        })
-        .cloned()
-        .collect();
-    anyhow::ensure!(
-        !approved.is_empty() && approved.len() == snapshot.approved_node_ids.len(),
-        "MARKETPLACE_POLICY_INVALID: approved_node_ids must be a non-empty unique list of node ids"
-    );
-    Ok(Some(approved))
-}
-
 async fn run_build(
     cloud: &Arc<CloudState>,
     bid: &str,
@@ -2485,11 +2417,6 @@ async fn run_build(
     first_deploy: bool,
 ) -> anyhow::Result<()> {
     cloud.projects.get_exact(&project, incarnation)?;
-    // A Marketplace policy is a deployment-scoped, immutable authorization
-    // snapshot. Do not refetch it here: the Clerk JWT belongs exclusively to
-    // DevHub's server-side consumer. This process uses only the validated,
-    // safe node-id allowlist copied into the request before the build began.
-    let marketplace_approved_nodes = marketplace_approved_nodes(&req)?;
     let region = &cloud.region;
     let region_label = region_label(region);
     let log = |s: String| cloud.builds.log(bid, s);
@@ -2614,7 +2541,6 @@ async fn run_build(
             !known_container,
             needs_build_isolation,
             known_build_toolchain,
-            marketplace_approved_nodes.as_ref(),
         );
         let build_diagnosis = crate::schedule::build_placement_diagnosis(
             cloud,
@@ -2657,12 +2583,6 @@ async fn run_build(
             );
             log(msg.clone());
             tracing::warn!(project = %project, gpu_nodes, "deploy refused: gpu requested, no GPU-capable target");
-            return Err(anyhow::anyhow!(msg));
-        }
-        if req.marketplace_placement.is_some() && targets.is_empty() {
-            let msg = "MARKETPLACE_PLACEMENT_UNAVAILABLE: no approved Marketplace node is currently healthy, reachable, and capable. The deployment was not placed outside buyer-authorized nodes.".to_string();
-            log(msg.clone());
-            tracing::warn!(project = %project, "deploy refused: no eligible Marketplace-approved node");
             return Err(anyhow::anyhow!(msg));
         }
         if known_wasm && targets.is_empty() {
@@ -2779,7 +2699,6 @@ async fn run_build(
                         !known_container,
                         needs_build_isolation,
                         known_build_toolchain,
-                        marketplace_approved_nodes.as_ref(),
                         &names,
                     );
                     let max = dispatch_fallback_max().min(fallbacks.len());
@@ -3407,23 +3326,9 @@ async fn run_build(
             || actual_branch == prod_branch,
         "resolved branch {actual_branch:?} contradicts the server-owned production branch {prod_branch:?}"
     );
-    // Marketplace migrations run after the managed Postgres record is Ready
-    // and before any workload runtime environment or traffic artifact is
-    // produced. The runner's only execution surface is BuildExecutor's
-    // migration capability; its secret connection value never enters either
-    // build_env, runtime_env, deployment records, or logs.
-    if cloud
-        .marketplace_releases
-        .workload_for_project(&project)
-        .is_some()
-    {
-        crate::marketplace_migrations::run(&cloud, &project, &dir)
-            .await
-            .map_err(|code| anyhow::anyhow!("{code}"))?;
-    }
     let is_production = trust.lane.is_production();
     let allow_all_environment = !trust.lane.is_fork();
-    let mut build_env = cloud.projects.env_map_for_execution_exact(
+    let build_env = cloud.projects.env_map_for_execution_exact(
         &project,
         incarnation,
         trust.lane.environment(),
@@ -3437,12 +3342,11 @@ async fn run_build(
         crate::project_settings::EnvExecutionScope::Runtime,
         allow_all_environment,
     )?;
-    let mut runtime_env = if req.no_fanout {
+    let runtime_env = if req.no_fanout {
         req.env.clone().unwrap_or(stored_runtime_env)
     } else {
         stored_runtime_env
     };
-    inject_marketplace_runtime(&project, &mut build_env, &mut runtime_env)?;
     if trust.lane.is_fork() {
         log(format!(
             "Fork preview: only explicitly preview-scoped variables are eligible ({} build, {} runtime); all-environment and production values are withheld.",
@@ -3465,34 +3369,7 @@ async fn run_build(
             ));
         }
     }
-    let checkout_dir = resolve_checkout_dir(&dir, None).await?;
-    // Standard repository project file (devhub.yml v1, shared with the
-    // "Deploy to Autheo DevHub" GitHub Action). Inert data read from the
-    // checkout root; invalid files fail the build like an invalid vercel.json.
-    // Precedence: deploy request > devhub.yml > persisted project settings.
-    let devhub_config = fluid_build::load_devhub_config_checked(&checkout_dir).map_err(|error| {
-        fluid_build::BuildContractError::invalid_metadata("load devhub.yml", error)
-    })?;
-    if let Some(config) = devhub_config.as_ref() {
-        log(format!(
-            "devhub.yml v{} loaded (root_dir: {}, build cache: {}).",
-            config.version,
-            config.root_dir().unwrap_or("."),
-            if config.build_cache_enabled() { "on" } else { "off" },
-        ));
-        if !config.env.is_empty() {
-            let keys: Vec<&str> = config.env.keys().map(String::as_str).collect();
-            log(format!(
-                "devhub.yml env keys ({}) are applied by the DevHub GitHub Action, not read from the repository at build time: {}.",
-                keys.len(),
-                keys.join(", ")
-            ));
-        }
-    }
-    let build_cache_enabled = req.use_cache
-        && devhub_config
-            .as_ref()
-            .map_or(true, fluid_build::DevhubConfig::build_cache_enabled);
+    let build_cache_enabled = req.use_cache;
 
     let persisted_root = cloud
         .projects
@@ -3506,20 +3383,11 @@ async fn run_build(
         .filter(|root| !root.is_empty())
         .map(str::to_string)
         .or_else(|| {
-            devhub_config
-                .as_ref()
-                .and_then(fluid_build::DevhubConfig::root_dir)
-                .map(str::to_string)
-        })
-        .or_else(|| {
             Some(persisted_root.trim())
                 .filter(|root| !root.is_empty())
                 .map(str::to_string)
         });
-    let devhub_root = devhub_config
-        .as_ref()
-        .and_then(fluid_build::DevhubConfig::root_dir)
-        .map(str::to_string);
+    let checkout_dir = resolve_checkout_dir(&dir, None).await?;
     let root_package_manager = if req.image_ref.is_none() {
         Some(
             fluid_build::detect_package_manager_checked(&checkout_dir).map_err(|error| {
@@ -3564,8 +3432,6 @@ async fn run_build(
             .is_some_and(|value| !value.trim().is_empty())
         {
             "deploy_request"
-        } else if devhub_root.as_deref() == Some(root) {
-            "devhub_yml"
         } else {
             "project_setting"
         };
@@ -3593,10 +3459,9 @@ async fn run_build(
             selection.relative.to_string_lossy().replace('\\', "/")
         };
         log(format!(
-            "Auto-detected workspace app: {relative} ({}; evidence: {}; decision: {}).",
+            "Auto-detected workspace app: {relative} ({}; evidence: {}).",
             selection.workspace_source,
-            selection.evidence.join(", "),
-            selection.decision_digest,
+            selection.evidence.join(", ")
         ));
         let selected = if selection.relative.as_os_str().is_empty() {
             checkout_dir.clone()
@@ -3815,7 +3680,6 @@ async fn run_build(
         req.image_cpus.as_deref(),
         req.image_pids.unwrap_or(0),
         req.image_ports.clone(),
-        req.image_volume_path.as_deref(),
     )
     .await?;
     coordinates.normalize_function_cwds(&mut manifest)?;
@@ -3971,7 +3835,6 @@ async fn run_build(
             apply_vercel_config(&mut manifest, vc, &|s| log(s));
         }
     }
-    inject_marketplace_workload_credential(&cloud, &project, &mut manifest)?;
 
     log("Uploading build outputs…".into());
     log(format!(
@@ -4217,7 +4080,8 @@ async fn run_build(
             })
             .collect();
         if !dropped.is_empty() {
-            let msg = format!(
+            let msg =
+                format!(
                 "Browser opt-in rejected — the deployment was NOT registered. fluid.json declares \
                  `functions[].browser` for {}, but this project builds through the {} path, which \
                  constructs its own function list and cannot carry a per-function browser opt-in. \
@@ -4235,11 +4099,7 @@ async fn run_build(
                     })
                     .collect::<Vec<_>>()
                     .join(", "),
-                if is_container {
-                    "container"
-                } else {
-                    "framework-detected"
-                },
+                if is_container { "container" } else { "framework-detected" },
                 manifest
                     .functions
                     .iter()
@@ -4544,11 +4404,7 @@ async fn run_build(
         Ok(ports) if !ports.is_empty() => {
             log(format!(
                 "Allocated public raw port(s): {} (stable across redeploys).",
-                ports
-                    .iter()
-                    .map(|p| p.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                ports.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", ")
             ));
             for f in &manifest.functions {
                 for spec in &f.ports {
@@ -4682,7 +4538,7 @@ async fn run_build(
         },
     };
     let info = if build_failed {
-        let info = cloud.gw.deploy_full_with_runtime_exact_marketplace(
+        let info = cloud.gw.deploy_full_with_runtime_exact(
             host_static_root,
             Some(runtime_workdir),
             manifest,
@@ -4692,12 +4548,11 @@ async fn run_build(
             DeployState::Error,
             tenant.clone(),
             incarnation,
-            req.marketplace_placement.clone(),
         );
         crate::admin::causal_stamp_new_deployment(cloud, &project, &info.id.0);
         info
     } else {
-        let mut staged = cloud.gw.stage_full_with_runtime_exact_marketplace(
+        let mut staged = cloud.gw.stage_full_with_runtime_exact(
             host_static_root,
             Some(runtime_workdir),
             manifest,
@@ -4706,7 +4561,6 @@ async fn run_build(
             is_production,
             tenant.clone(),
             incarnation,
-            req.marketplace_placement.clone(),
         )?;
         let deployment_id = staged.info().id.to_string();
         crate::admin::causal_stamp_new_deployment(cloud, &project, &deployment_id);
@@ -5009,7 +4863,6 @@ async fn run_build(
             true,
             true,
             tail_build_toolchain,
-            marketplace_approved_nodes.as_ref(),
         );
         if targets
             .iter()
@@ -6245,7 +6098,6 @@ async fn produce_manifest(
     image_cpus: Option<&str>,
     image_pids: u32,
     image_ports: Option<Vec<fluid_core::PortSpec>>,
-    image_volume_path: Option<&str>,
 ) -> anyhow::Result<Manifest> {
     let log = |s: String| cloud.builds.log(bid, s);
     if let Some(image) = image_ref {
@@ -6265,77 +6117,11 @@ async fn produce_manifest(
             image_pids,
             image_ports,
             skip_pull,
-            image_volume_path,
         )
         .await;
     }
     let mut isolated = isolated;
     let compose_path = crate::compose::compose_file(dir);
-    // Builder protocol v2 (DevHub): where the live-probed executor offers it, Dockerfile/Compose
-    // sources build to an OCI archive INSIDE the runsc BuildExecutor and the host only imports the
-    // sealed archive. Every other node keeps the host `podman build` path below.
-    let builder_v2_active = isolated
-        .as_deref()
-        .is_some_and(|session| session.builder_v2 && !session.host_build);
-    if builder_v2_active {
-        if let Some(compose) = compose_path.as_deref() {
-            let isolated = require_build_session(&mut isolated)?;
-            let image = build_oci_source(
-                cloud,
-                bid,
-                isolated,
-                dir,
-                compose,
-                crate::build_executor::BuildSurface::Compose,
-            )
-            .await?;
-            return image_container_manifest(
-                cloud,
-                bid,
-                project,
-                incarnation,
-                &image,
-                Some(3000),
-                Some(ServiceProtocol::Http),
-                0,
-                0.0,
-                0,
-                None,
-                false,
-                image_volume_path,
-            )
-            .await;
-        }
-        if let Some(dockerfile) = container_build_file(dir) {
-            let isolated = require_build_session(&mut isolated)?;
-            let port = parse_expose(&dockerfile).await.unwrap_or(3000);
-            let image = build_oci_source(
-                cloud,
-                bid,
-                isolated,
-                dir,
-                &dockerfile,
-                crate::build_executor::BuildSurface::Dockerfile,
-            )
-            .await?;
-            return image_container_manifest(
-                cloud,
-                bid,
-                project,
-                incarnation,
-                &image,
-                Some(port),
-                Some(ServiceProtocol::Http),
-                0,
-                0.0,
-                0,
-                None,
-                false,
-                image_volume_path,
-            )
-            .await;
-        }
-    }
     if let Some(compose_path) = compose_path {
         return compose_container_manifest(
             cloud,
@@ -6426,241 +6212,6 @@ async fn produce_manifest(
         )
         .await
     }
-}
-
-/// Build a Dockerfile or the single source-built Compose service wholly inside
-/// the live-probed BuildExecutor. The host only imports the executor-produced
-/// OCI archive after it has been copied back through the existing sealed-output
-/// path; it never receives the checkout as a bind mount and never invokes a
-/// host-native image builder.
-async fn build_oci_source(
-    cloud: &Arc<CloudState>,
-    bid: &str,
-    isolated: &mut IsolatedBuild,
-    dir: &Path,
-    definition: &Path,
-    surface: crate::build_executor::BuildSurface,
-) -> anyhow::Result<String> {
-    anyhow::ensure!(
-        !isolated.host_build && isolated.builder_v2,
-        "BUILDER_V2_UNAVAILABLE: OCI source builds require the runsc BuildExecutor"
-    );
-    let definition = validate_builder_definition(dir, definition, surface).await?;
-    let definition_name = definition
-        .strip_prefix(dir)
-        .ok()
-        .and_then(|path| path.to_str())
-        .ok_or_else(|| anyhow::anyhow!("BUILDER_V2_INVALID_INPUT: invalid build definition"))?;
-    let archive_name = format!(".hive-builder-v2-{}.oci", Uuid::new_v4().simple());
-    let tag = format!("localhost/hive-source-{}:build", Uuid::new_v4().simple());
-    let script = r#"set -eu
-definition=$1
-archive=$2
-tag=$3
-case "$definition" in
-  ""|/*|*..*|*\\*) printf '%s\n' BUILDER_V2_INVALID_INPUT >&2; exit 41 ;;
-esac
-test -f "$definition"
-test ! -L "$definition"
-rm -f -- "$archive"
-buildah --storage-driver=vfs bud --isolation=chroot --format=oci --layers=false \
-  --no-cache --file "$definition" --tag "$tag" .
-buildah --storage-driver=vfs push --format=oci "$tag" "oci-archive:$archive:hive-workload"
-test -s "$archive"
-"#;
-    cloud.builds.log(
-        bid,
-        "Builder v2: validating and building OCI image in runsc isolation.",
-    );
-    isolated
-        .run(
-            dir,
-            script,
-            "builder-v2 OCI source build",
-            &[definition_name.to_owned(), archive_name.clone(), tag],
-            false,
-            cloud,
-            bid,
-            &Default::default(),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("BUILDER_V2_BUILD_FAILED"))?;
-    isolated.finish().await?;
-    let archive = dir.join(&archive_name);
-    let image = load_attested_oci_archive(&archive).await?;
-    let _ = tokio::fs::remove_file(&archive).await;
-    cloud.builds.log(
-        bid,
-        "Builder v2: OCI image resolved to an immutable digest.",
-    );
-    Ok(image)
-}
-
-/// Validate all repository-directed OCI inputs before the executor sees them.
-/// Error strings intentionally carry no checkout path, host detail, or topology.
-async fn validate_builder_definition(
-    dir: &Path,
-    definition: &Path,
-    surface: crate::build_executor::BuildSurface,
-) -> anyhow::Result<PathBuf> {
-    let root = tokio::fs::canonicalize(dir)
-        .await
-        .map_err(|_| anyhow::anyhow!("BUILDER_V2_INVALID_INPUT"))?;
-    let candidate = tokio::fs::canonicalize(definition)
-        .await
-        .map_err(|_| anyhow::anyhow!("BUILDER_V2_INVALID_INPUT"))?;
-    anyhow::ensure!(
-        candidate.starts_with(&root)
-            && tokio::fs::symlink_metadata(&candidate)
-                .await
-                .map(|m| m.is_file() && !m.file_type().is_symlink())
-                .unwrap_or(false),
-        "BUILDER_V2_INVALID_INPUT"
-    );
-    let contents = tokio::fs::read_to_string(&candidate)
-        .await
-        .map_err(|_| anyhow::anyhow!("BUILDER_V2_INVALID_INPUT"))?;
-    anyhow::ensure!(contents.len() <= 1024 * 1024, "BUILDER_V2_INVALID_INPUT");
-    match surface {
-        crate::build_executor::BuildSurface::Dockerfile => {
-            for line in contents.lines() {
-                let directive = line.trim().to_ascii_lowercase();
-                anyhow::ensure!(
-                    !directive.starts_with("add http")
-                        && !directive.contains("--mount")
-                        && !directive.contains("--network=host")
-                        && !directive.contains("--privileged")
-                        && !directive.contains("--device"),
-                    "BUILDER_V2_UNSUPPORTED_SURFACE"
-                );
-            }
-        }
-        crate::build_executor::BuildSurface::Compose => {
-            let compose: serde_yaml::Value = serde_yaml::from_str(&contents)
-                .map_err(|_| anyhow::anyhow!("BUILDER_V2_INVALID_INPUT"))?;
-            let services = compose
-                .get("services")
-                .and_then(serde_yaml::Value::as_mapping)
-                .ok_or_else(|| anyhow::anyhow!("BUILDER_V2_INVALID_INPUT"))?;
-            anyhow::ensure!(services.len() == 1, "BUILDER_V2_UNSUPPORTED_SURFACE");
-            let service = services
-                .values()
-                .next()
-                .and_then(serde_yaml::Value::as_mapping)
-                .ok_or_else(|| anyhow::anyhow!("BUILDER_V2_INVALID_INPUT"))?;
-            for forbidden in [
-                "privileged",
-                "network_mode",
-                "volumes",
-                "devices",
-                "secrets",
-                "configs",
-                "pid",
-                "ipc",
-            ] {
-                anyhow::ensure!(
-                    !service.contains_key(&serde_yaml::Value::String(forbidden.into())),
-                    "BUILDER_V2_UNSUPPORTED_SURFACE"
-                );
-            }
-            let build = service
-                .get(&serde_yaml::Value::String("build".into()))
-                .ok_or_else(|| anyhow::anyhow!("BUILDER_V2_UNSUPPORTED_SURFACE"))?;
-            let context = match build {
-                serde_yaml::Value::String(value) => value.as_str(),
-                serde_yaml::Value::Mapping(map) => map
-                    .get(&serde_yaml::Value::String("context".into()))
-                    .and_then(serde_yaml::Value::as_str)
-                    .unwrap_or("."),
-                _ => return Err(anyhow::anyhow!("BUILDER_V2_INVALID_INPUT")),
-            };
-            let context = crate::build_executor::WorkspacePath::parse(context.to_owned())
-                .map_err(|_| anyhow::anyhow!("BUILDER_V2_INVALID_INPUT"))?;
-            anyhow::ensure!(context.as_str() == ".", "BUILDER_V2_UNSUPPORTED_SURFACE");
-            let context = root.join(context.as_str());
-            anyhow::ensure!(
-                tokio::fs::canonicalize(&context)
-                    .await
-                    .map(|path| path.starts_with(&root))
-                    .unwrap_or(false),
-                "BUILDER_V2_INVALID_INPUT"
-            );
-            let dockerfile = match build {
-                serde_yaml::Value::Mapping(map) => map
-                    .get(&serde_yaml::Value::String("dockerfile".into()))
-                    .and_then(serde_yaml::Value::as_str)
-                    .unwrap_or("Dockerfile"),
-                _ => "Dockerfile",
-            };
-            let dockerfile = crate::build_executor::WorkspacePath::parse(dockerfile.to_owned())
-                .map_err(|_| anyhow::anyhow!("BUILDER_V2_INVALID_INPUT"))?;
-            let dockerfile = root.join(dockerfile.as_str());
-            let dockerfile = tokio::fs::canonicalize(dockerfile)
-                .await
-                .map_err(|_| anyhow::anyhow!("BUILDER_V2_INVALID_INPUT"))?;
-            anyhow::ensure!(
-                dockerfile.starts_with(&root)
-                    && tokio::fs::symlink_metadata(&dockerfile)
-                        .await
-                        .map(|m| m.is_file() && !m.file_type().is_symlink())
-                        .unwrap_or(false),
-                "BUILDER_V2_INVALID_INPUT"
-            );
-            return Box::pin(validate_builder_definition(
-                &root,
-                &dockerfile,
-                crate::build_executor::BuildSurface::Dockerfile,
-            ))
-            .await;
-        }
-        crate::build_executor::BuildSurface::RepositoryCommands => unreachable!(),
-    }
-    Ok(candidate)
-}
-
-/// Import the sealed archive without building on the host, then select only the
-/// image ID that Podman reports after import. A tag is never returned to the
-/// deployment manifest.
-async fn load_attested_oci_archive(archive: &Path) -> anyhow::Result<String> {
-    let metadata = tokio::fs::symlink_metadata(archive)
-        .await
-        .map_err(|_| anyhow::anyhow!("BUILDER_V2_OUTPUT_INVALID"))?;
-    anyhow::ensure!(
-        metadata.is_file() && !metadata.file_type().is_symlink() && metadata.len() > 0,
-        "BUILDER_V2_OUTPUT_INVALID"
-    );
-    let output = Command::new("podman")
-        .arg("load")
-        .arg("--input")
-        .arg(archive)
-        .env("PATH", podman_path_env())
-        .output()
-        .await
-        .map_err(|_| anyhow::anyhow!("BUILDER_V2_IMPORT_FAILED"))?;
-    anyhow::ensure!(output.status.success(), "BUILDER_V2_IMPORT_FAILED");
-    let text = String::from_utf8_lossy(&output.stdout);
-    let loaded = text
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("Loaded image: "))
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("BUILDER_V2_OUTPUT_INVALID"))?;
-    let inspect = Command::new("podman")
-        .args(["image", "inspect", "--format", "{{.Id}}", loaded])
-        .env("PATH", podman_path_env())
-        .output()
-        .await
-        .map_err(|_| anyhow::anyhow!("BUILDER_V2_IMPORT_FAILED"))?;
-    anyhow::ensure!(inspect.status.success(), "BUILDER_V2_IMPORT_FAILED");
-    let image = String::from_utf8_lossy(&inspect.stdout).trim().to_owned();
-    anyhow::ensure!(
-        image.starts_with("sha256:")
-            && image.len() == 71
-            && image[7..]
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
-        "BUILDER_V2_OUTPUT_INVALID"
-    );
-    Ok(image)
 }
 
 /// The module a direct-interpreter `start_cmd` names, when the argv is one plain `node <entry>` /
@@ -6975,9 +6526,7 @@ impl<'a> PackageManagerLauncher<'a> {
 
     fn add_svelte_adapter(&self) -> String {
         let arguments = match self.detection.manager {
-            "npm" => {
-                "install -D --no-save --package-lock=false --no-audit --no-fund --legacy-peer-deps \"$spec\""
-            }
+            "npm" => "install -D --no-save --package-lock=false --no-audit --no-fund --legacy-peer-deps \"$spec\"",
             "pnpm" => "add -D --lockfile=false --config.strict-peer-dependencies=false \"$spec\"",
             "yarn" => "add -D \"$spec\"",
             "bun" => "add -d \"$spec\"",
@@ -7893,9 +7442,7 @@ done' hive-delink {} +
                     let prm = fluid_build::per_route::discover(&next_dir);
                     log(format!(
                         "per-route: classified {} route(s) — {} per-route-eligible (Node), {} on next-start fallback (static/edge/middleware).",
-                        prm.routes.len(),
-                        prm.eligible_count(),
-                        prm.fallback_count()
+                        prm.routes.len(), prm.eligible_count(), prm.fallback_count()
                     ));
                     route_policies = prm
                         .routes
@@ -9006,9 +8553,7 @@ async fn warmup_bun_bytecode(
                 .to_string_lossy()
                 .into_owned();
             let ver = bun_version(&bun_bin).await.unwrap_or_else(|| "?".into());
-            log(format!(
-                "Bytecode-cache: bundled + precompiled `{entry_arg}` -> `{rel}` (bun {ver}, with external source map)."
-            ));
+            log(format!("Bytecode-cache: bundled + precompiled `{entry_arg}` -> `{rel}` (bun {ver}, with external source map)."));
             vec!["bun".to_string(), "run".to_string(), rel]
         }
         Ok(o) => {
@@ -9017,15 +8562,11 @@ async fn warmup_bun_bytecode(
                 .chars()
                 .take(300)
                 .collect();
-            log(format!(
-                "Bytecode-cache: bun build failed ({stderr}); using the original entry uncached — app still starts normally."
-            ));
+            log(format!("Bytecode-cache: bun build failed ({stderr}); using the original entry uncached — app still starts normally."));
             original
         }
         Err(e) => {
-            log(format!(
-                "Bytecode-cache: could not run `bun build` ({e}); using the original entry uncached."
-            ));
+            log(format!("Bytecode-cache: could not run `bun build` ({e}); using the original entry uncached."));
             original
         }
     }
@@ -9165,9 +8706,6 @@ fn build_executor_platform_fault(error: &anyhow::Error) -> bool {
 struct IsolatedBuild {
     root: PathBuf,
     session: Option<crate::build_executor::BuildSession>,
-    /// Builder protocol v2 (OCI Dockerfile/Compose builds inside the runsc BuildExecutor) is
-    /// offered by the live-probed executor on this node.
-    builder_v2: bool,
     /// When set, repository commands run as PLAIN HOST PROCESSES in the checkout, as
     /// `MockBackend`/`LiteboxBackend` have always built: those backends sandbox tenant functions at
     /// RUN time and their build lane never used the isolated executor, so requiring it would break
@@ -9213,7 +8751,6 @@ impl IsolatedBuild {
         Ok(Self {
             root: root.to_path_buf(),
             session: Some(session),
-            builder_v2: executor.capability().builder_v2,
             host_build: false,
             registry: None,
         })
@@ -9226,7 +8763,6 @@ impl IsolatedBuild {
         Self {
             root: root.to_path_buf(),
             session: None,
-            builder_v2: false,
             host_build: true,
             registry: None,
         }
@@ -10255,7 +9791,6 @@ async fn compose_container_manifest(
         image_pids,
         image_ports,
         skip_pull,
-        None,
     )
     .await
 }
@@ -10355,7 +9890,6 @@ async fn dockerfile_container_manifest(
         image_pids,
         image_ports,
         true,
-        None,
     )
     .await
 }
@@ -10649,23 +10183,6 @@ fn container_volume_path(project_override: Option<&str>) -> String {
         .unwrap_or_else(|| "/data".to_string())
 }
 
-pub(crate) fn valid_image_volume_path(path: &str) -> bool {
-    path.starts_with('/')
-        && path.len() <= 256
-        && path != "/"
-        && path
-            .split('/')
-            .skip(1)
-            .all(|part| {
-                part != "."
-                    && part != ".."
-                    && !part.is_empty()
-                    && part.bytes().all(|byte| {
-                        byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')
-                    })
-            })
-}
-
 /// The run-config JSON (container `start_cmd[3]`) that attaches an automatic persistent volume: a
 /// host-backed named volume (≥1 GB) keyed STABLY per project (plus an optional service suffix for
 /// compose), so a container's data survives instance restarts and redeploys. It also puts the
@@ -10681,138 +10198,14 @@ fn container_volume_cfg(
 ) -> String {
     let name = project_volume_name(project, incarnation, service);
     let (net, subnet, gw) = project_net(project);
-    // The Marketplace application's stable private API hostname resolves to
-    // THIS node's bridge gateway only for the configured Marketplace project.
-    // The node-local HTTPS gateway then selects a destination over Iroh; the
-    // application never receives mesh topology.  Other tenant projects get no
-    // such host entry and cannot address the gateway by this name.
-    let hosts = std::env::var("HIVE_MARKETPLACE_PROJECT")
-        .ok()
-        .filter(|configured| configured == project)
-        .map(|_| {
-            let host = std::env::var("HIVE_MARKETPLACE_GATEWAY_HOST")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| "devhub-marketplace.internal".into());
-            vec![format!("{host}:{gw}")]
-        })
-        .unwrap_or_default();
     serde_json::json!({
         "vol": name,
         "volpath": container_volume_path(volume_path),
         "net": net,
         "subnet": subnet,
         "gw": gw,
-        "hosts": hosts,
     })
     .to_string()
-}
-
-/// Inject the Marketplace application's server/runtime contract from
-/// node-owned secrets.  The repository never carries these values and the
-/// deployment request cannot override them.  Only the public Clerk key is
-/// exposed to the build, because Next.js must bake `NEXT_PUBLIC_*` values;
-/// every other value remains runtime-only.
-fn inject_marketplace_runtime(
-    project: &str,
-    build_env: &mut std::collections::BTreeMap<String, String>,
-    runtime_env: &mut std::collections::BTreeMap<String, String>,
-) -> anyhow::Result<()> {
-    if std::env::var("HIVE_MARKETPLACE_PROJECT").ok().as_deref() != Some(project) {
-        return Ok(());
-    }
-    let required = |name: &str| -> anyhow::Result<String> {
-        std::env::var(name)
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| {
-                anyhow::anyhow!("Marketplace runtime is missing required operator secret {name}")
-            })
-    };
-    let values = [
-        (
-            "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
-            required("HIVE_MARKETPLACE_RUNTIME_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY")?,
-        ),
-        (
-            "CLERK_SECRET_KEY",
-            required("HIVE_MARKETPLACE_RUNTIME_CLERK_SECRET_KEY")?,
-        ),
-        (
-            "CLERK_JWT_ISSUER",
-            required("HIVE_MARKETPLACE_RUNTIME_CLERK_JWT_ISSUER")?,
-        ),
-        (
-            "DEVHUB_PRIVATE_BACKEND_URL",
-            "https://devhub-marketplace.internal".to_string(),
-        ),
-        (
-            "DEVHUB_MARKETPLACE_KEY_ID",
-            required("HIVE_MARKETPLACE_RUNTIME_DEVHUB_MARKETPLACE_KEY_ID")?,
-        ),
-        (
-            "DEVHUB_MARKETPLACE_SIGNING_SECRET",
-            required("HIVE_MARKETPLACE_RUNTIME_DEVHUB_MARKETPLACE_SIGNING_SECRET")?,
-        ),
-    ];
-    for (key, value) in values {
-        runtime_env.insert(key.to_owned(), value);
-    }
-    let public_key = runtime_env
-        .get("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY")
-        .cloned()
-        .expect("Marketplace public key inserted above");
-    build_env.insert("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY".into(), public_key);
-    Ok(())
-}
-
-/// Attach the sole fixed Marketplace credential mount selector to container
-/// functions. The selector is issued by `MarketplaceReleaseStore`, not by a
-/// project setting, deploy request, or repository manifest; hive-backend maps
-/// it to the fixed root-owned runtime files and rejects every other mount.
-fn inject_marketplace_workload_credential(
-    cloud: &CloudState,
-    project: &str,
-    manifest: &mut Manifest,
-) -> anyhow::Result<()> {
-    let credential = cloud
-        .marketplace_releases
-        .unambiguous_credential_for_project(project)
-        .map_err(|code| anyhow::anyhow!("{code}"))?;
-    let Some(credential) = credential else {
-        return Ok(());
-    };
-    for function in &mut manifest.functions {
-        anyhow::ensure!(
-            function.start_cmd.first().map(String::as_str) == Some("__container__")
-                && function.start_cmd.len() == 4,
-            "marketplace_workload_certificate_runtime_unsupported"
-        );
-        let mut config: serde_json::Value = serde_json::from_str(&function.start_cmd[3])
-            .map_err(|_| anyhow::anyhow!("marketplace_workload_certificate_runtime_unsupported"))?;
-        let object = config.as_object_mut().ok_or_else(|| {
-            anyhow::anyhow!("marketplace_workload_certificate_runtime_unsupported")
-        })?;
-        // These platform-generated keys are never accepted from tenant
-        // manifests. A preexisting value indicates an attempt to bypass the
-        // immutable release authority and fails closed.
-        anyhow::ensure!(
-            !object.contains_key("marketplace_workload_mtls")
-                && !object.contains_key("marketplace_credential_id"),
-            "marketplace_workload_certificate_runtime_unsupported"
-        );
-        object.insert(
-            "marketplace_workload_mtls".into(),
-            serde_json::Value::Bool(true),
-        );
-        object.insert(
-            "marketplace_credential_id".into(),
-            serde_json::Value::String(credential.clone()),
-        );
-        function.start_cmd[3] = serde_json::to_string(&config)
-            .map_err(|_| anyhow::anyhow!("marketplace_workload_certificate_runtime_unsupported"))?;
-    }
-    Ok(())
 }
 
 /// Deterministic per-project podman network (name, /24 subnet, gateway) in the 10.128-191/16 space,
@@ -11135,15 +10528,8 @@ async fn image_container_manifest(
     pids: u32,
     ports_override: Option<Vec<PortSpec>>,
     skip_pull: bool,
-    image_volume_path: Option<&str>,
 ) -> anyhow::Result<Manifest> {
     let log = |s: String| cloud.builds.log(bid, s);
-    if let Some(path) = image_volume_path {
-        anyhow::ensure!(valid_image_volume_path(path), "invalid image volume mount path");
-    }
-    // A builder-v2 image is already imported from the sealed OCI archive and is addressed only by
-    // its local content digest: pulling it would make a mutable registry tag deployment authority.
-    let skip_pull = skip_pull || image.starts_with("sha256:");
     let path = podman_path_env();
     let qualified = if skip_pull {
         image.to_string()
@@ -11187,8 +10573,7 @@ async fn image_container_manifest(
         .projects
         .get_exact(project, incarnation)?
         .container
-        .and_then(|s| s.volume_mount_path)
-        .or_else(|| image_volume_path.map(str::to_owned));
+        .and_then(|s| s.volume_mount_path);
     log(format!(
         "Container port {port}/{protocol}{}. Attaching persistent volume (≥1 GB) at {}.",
         if port_override.is_some() || protocol_override.is_some() {
@@ -11209,36 +10594,6 @@ async fn image_container_manifest(
         pids,
         volume_path.as_deref(),
     );
-    // Game-server settings (bn-game-server-mods): version pins land as env on
-    // the container function (never overriding an explicit declaration), and
-    // the Drive mods sync + world snapshot run against the SAME named volume
-    // the manifest just attached, using the just-pulled image as the helper
-    // container. Degrades to logged gaps, never a build failure.
-    let game_spec = cloud
-        .projects
-        .get_exact(project, incarnation)?
-        .game;
-    if let Some(game) = game_spec {
-        if let Some(f) = manifest.functions.first_mut() {
-            if let Some(v) = game.game_version.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-                f.env.entry("VERSION".into()).or_insert_with(|| v.to_string());
-            }
-            if let Some(t) = game.server_type.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-                f.env.entry("TYPE".into()).or_insert_with(|| t.to_string());
-            }
-        }
-        let team = cloud.projects.team_of(project);
-        crate::game_mods::apply_game_settings(
-            cloud,
-            bid,
-            project,
-            &team,
-            image,
-            &project_volume_name(project, incarnation, None),
-            &game,
-        )
-        .await;
-    }
     if let Some(ports) = ports_override.filter(|p| !p.is_empty()) {
         log(format!(
             "Declared {} additional port(s): {}.",
@@ -12135,8 +11490,6 @@ async fn git_poll_one(cloud: &Arc<CloudState>, project: String) -> GitPollOutcom
         // the build, from the same primitive the poll used for `ls-remote` above, so a poll
         // deploy is not pinned to this coordinator's credential (and mints no second token).
         git_token: None,
-        image_volume_path: None,
-        marketplace_placement: None,
     };
     let build_id = match start_build(cloud.clone(), req, None, None).await {
         Ok(id) => id,

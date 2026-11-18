@@ -1,11 +1,9 @@
 # RUNBOOK — ngrok → real DNS (`shadw.cloud` + `*.shadw.app` via Vercel DNS)
 
-The platform serves tenant deployments on `*.shadw.app` (every deployment
-alias, one label), with TLS terminated by the nodes themselves (ACME DNS-01
-wildcard via the Vercel API) and DNS records reconciled from live node health
-by a leader-elected loop. Hive Admin is private on `127.0.0.1:8786` by default;
-`api.shadw.cloud`, `admin.shadw.cloud`, and `webhook.shadw.cloud` are not
-supported public control-plane hosts and are explicitly rejected by ingress.
+The platform serves everything on its own domains: `api.shadw.cloud` (control
+plane), `*.shadw.app` (every deployment alias, one label), with TLS terminated
+by the nodes themselves (ACME DNS-01 wildcard via the Vercel API) and DNS
+records reconciled from live node health by a leader-elected loop.
 
 Two registrable domains is deliberate (the vercel.com / vercel.app split): user
 content on `shadw.app` can never set cookies on, or shadow, `shadw.cloud`.
@@ -48,11 +46,9 @@ Never serve user apps from a `shadw.cloud` subdomain.
    (or `setcap 'cap_net_bind_service=+ep' /root/fc-target/release/hive-cloud`
    after every binary swap — the systemd capability survives swaps, setcap does
    not; prefer the drop-in.)
-7. **`HIVE_JWT_SECRET` must be set on every production node**. It enforces
-   Admin identity on all reads and mutations other than minimal local
-   `/healthz`. Do not publish port 8786, Admin, Swagger, Marketplace, or
-   webhook routes. A private management bind additionally requires explicit
-   `HIVE_ADMIN_PRIVATE_NETWORK=1`; public/wildcard Admin binds fail startup.
+7. **`HIVE_JWT_SECRET` must be set on every node** before any non-ngrok ingress
+   mode: `api.shadw.cloud` exposes the admin router publicly and the node
+   refuses to host-split without JWT enforcement.
 8. Relay/discovery names: set `HIVE_RELAY_IPS` / `HIVE_DISCOVERY_IPS`
    (comma-separated public IPs of the nodes running the self-hosted iroh relay
    / pkarr relay) on the LEADER-capable nodes so
@@ -209,13 +205,6 @@ gossips a NodeInfo carrying that key's iroh address.
   restart on another node.
 - **The dashboard** (`ui/`, port 3002): its own OS process/launchd unit;
   restarting or redeploying it never touches gossip/mesh/DNS state.
-- **The primary Autheo Development Hub** (`autheo-devhub.service`, port 3001):
-  a separate, opt-in Next.js release at `/opt/autheo-devhub`, managed by
-  `ansible/playbooks/parallel-deploy.yml --tags autheo_devhub` with
-  `autheo_devhub_enabled=true`. It is not the `hive-ui` dashboard and does not
-  replace the dashboard's port 3002 deployment. Its loopback health endpoint
-  is `http://127.0.0.1:3001/`; its existing `/etc/autheo-devhub.env` stays
-  outside the release artifact.
 - **Existing peers**: a hot-join needs zero restarts anywhere in the fleet.
   A `hive-cloud` restart on ONE node re-joins the mesh from its own
   persisted roster/GuardianDB replica + iroh's persistent identity —

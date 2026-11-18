@@ -17,7 +17,6 @@ import {
   ChevronRight,
   Activity,
   Loader2,
-  ShieldCheck,
   CircleX,
 } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -28,8 +27,6 @@ import { DeploymentRowMenu } from "@/components/deployment-menu";
 import { RedeployModal } from "@/components/redeploy-modal";
 import { CreateDeploymentModal } from "@/components/create-deployment-modal";
 import { AttachedDomains } from "@/components/attached-domains";
-import { MarketplaceDeploymentModal } from "@/components/marketplace-deployment-modal";
-import { MarketplaceProjectResources } from "@/components/marketplace-project-resources";
 
 const ServiceGraph = dynamic(
   () => import("@/components/service-graph").then((m) => m.ServiceGraph),
@@ -87,7 +84,6 @@ function ProjectDetailInner({ params }: { params: { project: string } }) {
   const [busy, setBusy] = useState("");
   const [redeployFor, setRedeployFor] = useState<Deployment | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
-  const [marketplaceOpen, setMarketplaceOpen] = useState(false);
   const [retryError, setRetryError] = useState("");
   const mayDelete = useCan()("project.delete");
   const rawPending = usePendingBuilds({ project: name });
@@ -193,9 +189,6 @@ function ProjectDetailInner({ params }: { params: { project: string } }) {
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setMarketplaceOpen(true)}>
-            <ShieldCheck className="h-4 w-4" /> Marketplace
-          </Button>
           {hasNoDeployment ? (
             <Button variant="outline" onClick={retryBuild} disabled={!retrySource || !!busy || !!building}>
               {busy === "retry" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Retry build
@@ -236,13 +229,9 @@ function ProjectDetailInner({ params }: { params: { project: string } }) {
       ) : tab === "workflows" ? (
         <WfConsoleFrame project={name} />
       ) : tab === "resources" ? (
-        <>
-          <MarketplaceProjectResources project={name} />
-          <DeploymentResources deploymentId={prod?.id} />
-        </>
+        <DeploymentResources deploymentId={prod?.id} />
       ) : tab === "overview" ? (
         <>
-          <MarketplaceProjectResources project={name} />
           {hasNoDeployment ? (
             <EmptyProjectCard
               name={name}
@@ -258,9 +247,6 @@ function ProjectDetailInner({ params }: { params: { project: string } }) {
             <div className="flex items-center justify-between border-b border-border px-5 py-3">
               <span className="font-medium">Production Deployment</span>
               <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setMarketplaceOpen(true)}>
-                  <ShieldCheck className="h-4 w-4" /> Marketplace
-                </Button>
                 <Button variant="outline" onClick={() => prod && setRedeployFor(prod)} disabled={!prod?.git}>
                   <RefreshCw className="h-4 w-4" /> Redeploy
                 </Button>
@@ -379,7 +365,6 @@ function ProjectDetailInner({ params }: { params: { project: string } }) {
           <span className="text-sm text-secondary">{mine.length + pendingRows.length} deployment{mine.length + pendingRows.length === 1 ? "" : "s"}</span>
           <div className="flex gap-2">
             <Button onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> New Deployment</Button>
-            <Button variant="outline" onClick={() => setMarketplaceOpen(true)}><ShieldCheck className="h-4 w-4" /> Marketplace</Button>
           </div>
         </div>
         <Table>
@@ -499,16 +484,6 @@ function ProjectDetailInner({ params }: { params: { project: string } }) {
           repoUrl={prod?.git?.repo_url ?? retrySource}
           branch={prod?.git?.branch ?? lastBuild?.branch}
           onClose={() => setCreateOpen(false)}
-          onDone={() => {
-            setTab("deployments");
-            refresh();
-          }}
-        />
-      )}
-      {marketplaceOpen && (
-        <MarketplaceDeploymentModal
-          project={name}
-          onClose={() => setMarketplaceOpen(false)}
           onDone={() => {
             setTab("deployments");
             refresh();

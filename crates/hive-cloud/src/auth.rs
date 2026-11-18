@@ -494,9 +494,7 @@ pub fn api_key_claims(c: &crate::state::CloudState, token: &str) -> Option<Claim
 /// `/v1/sqlite/` (the database's own bearer, checked in `hrana.rs`); `/v1/browser-db/` (the
 /// project's `browser_db_rest` bearer); `/v1/drive/webdav/` (HTTP Basic, verified by
 /// `drive_webdav.rs` before any filesystem call); `/v1/scim/v2/` (the team's SCIM bearer, resolved
-/// by `enterprise_api::scim_auth`: an IdP's directory sync carries no platform JWT); `/v1/marketplace/`
-/// (the Autheo Marketplace's own `x-marketplace-key` HMAC, verified by `marketplace_authorization`).
-/// The SAML ACS
+/// by `enterprise_api::scim_auth`: an IdP's directory sync carries no platform JWT). The SAML ACS
 /// is deliberately NOT here: its handler verifies no signature.
 ///
 /// THE one list: `require_auth` and `main::admin_ingress` (which rejects an unauthenticated
@@ -514,9 +512,6 @@ pub fn is_open_route(path: &str) -> bool {
         || path.starts_with("/v1/sqlite/")
         || path.starts_with("/v1/browser-db/")
         || path.starts_with("/v1/drive/webdav/")
-        // Marketplace is a separately authenticated server-to-server integration: its routes
-        // reject an absent/invalid `x-marketplace-key` HMAC themselves and never accept a hive JWT.
-        || path.starts_with("/v1/marketplace/")
         || path.starts_with("/v1/scim/v2/")
 }
 

@@ -746,11 +746,6 @@ pub struct Checkout {
     /// verifies actual payment with Stripe through it instead of trusting a client's say-so.
     #[serde(default)]
     pub stripe_session_id: String,
-    /// A server-verified THEO transaction hash. Presence means this checkout
-    /// has already been consumed and lets a client safely retry confirmation
-    /// without applying credits or fulfillment a second time.
-    #[serde(default)]
-    pub theo_transaction_hash: String,
     pub created_ms: u64,
 }
 
@@ -830,7 +825,6 @@ pub struct BillingStore {
     accounts: RwLock<HashMap<String, BillingAccount>>,
     ledger: RwLock<Vec<LedgerEntry>>,
     checkouts: RwLock<HashMap<String, Checkout>>,
-    confirmed_theo_checkouts: RwLock<HashMap<String, Checkout>>,
     meters: RwLock<HashMap<String, MeterState>>,
     invoices: RwLock<HashMap<String, Vec<Invoice>>>,
     /// Set when this process restored a snapshot with NO meters field (a pre-upgrade node's, or
@@ -1537,21 +1531,12 @@ impl BillingStore {
         } else {
             tenant
         };
-        let mut checkouts: Vec<Checkout> = self
-            .checkouts
+        self.checkouts
             .read()
             .values()
             .filter(|c| c.tenant == tenant)
             .cloned()
-            .collect();
-        checkouts.extend(
-            self.confirmed_theo_checkouts
-                .read()
-                .values()
-                .filter(|c| c.tenant == tenant)
-                .cloned(),
-        );
-        checkouts
+            .collect()
     }
 
     pub fn open_checkout(
@@ -1585,7 +1570,6 @@ impl BillingStore {
             sku: sku.to_string(),
             target: target.to_string(),
             stripe_session_id: String::new(),
-            theo_transaction_hash: String::new(),
             created_ms: now_ms(),
         };
         self.checkouts.write().insert(c.id.clone(), c.clone());
@@ -1633,11 +1617,7 @@ impl BillingStore {
     }
 
     pub fn get_checkout(&self, id: &str) -> Option<Checkout> {
-        self.checkouts
-            .read()
-            .get(id)
-            .cloned()
-            .or_else(|| self.confirmed_theo_checkouts.read().get(id).cloned())
+        self.checkouts.read().get(id).cloned()
     }
 
     /// Drops an open checkout the payment provider never accepted. Nothing was charged, so unlike
@@ -1680,52 +1660,6 @@ impl BillingStore {
             _ => self.account(&c.tenant),
         };
         Ok((c, acc))
-    }
-
-    /// Atomically consumes an open checkout after the caller verified the
-    /// transfer on-chain. The short retained record makes same-hash retries
-    /// idempotent and rejects a transaction hash used by another checkout.
-    pub fn confirm_theo_checkout(
-        &self,
-        id: &str,
-        transaction_hash: &str,
-    ) -> Result<(Checkout, BillingAccount, bool), &'static str> {
-        if let Some(existing) = self.confirmed_theo_checkouts.read().get(id).cloned() {
-            return if existing
-                .theo_transaction_hash
-                .eq_ignore_ascii_case(transaction_hash)
-            {
-                Ok((existing.clone(), self.account(&existing.tenant), true))
-            } else {
-                Err("checkout already confirmed with a different transaction")
-            };
-        }
-        let checkout = self
-            .checkouts
-            .write()
-            .remove(id)
-            .ok_or("checkout not found")?;
-        if self.confirmed_theo_checkouts.read().values().any(|co| {
-            co.theo_transaction_hash
-                .eq_ignore_ascii_case(transaction_hash)
-        }) {
-            self.checkouts.write().insert(checkout.id.clone(), checkout);
-            return Err("transaction has already been used for another checkout");
-        }
-        let mut checkout = checkout;
-        checkout.theo_transaction_hash = transaction_hash.to_ascii_lowercase();
-        let account = match checkout.kind.as_str() {
-            "credits" => self.add_credits(
-                &checkout.tenant,
-                checkout.amount_cents,
-                "Credit top-up (checkout)",
-            ),
-            _ => self.account(&checkout.tenant),
-        };
-        self.confirmed_theo_checkouts
-            .write()
-            .insert(checkout.id.clone(), checkout.clone());
-        Ok((checkout, account, false))
     }
 
     /// Persistence comes in FOUR pairs: `snapshot`/`load` (accounts + ledger),
@@ -1812,13 +1746,6 @@ impl BillingStore {
             .filter(|c| now.saturating_sub(c.created_ms) < CHECKOUT_RETENTION_MS)
             .cloned()
             .collect();
-        v.extend(
-            self.confirmed_theo_checkouts
-                .read()
-                .values()
-                .filter(|c| now.saturating_sub(c.created_ms) < CHECKOUT_RETENTION_MS)
-                .cloned(),
-        );
         v.sort_by(|a, b| a.id.cmp(&b.id));
         v
     }
@@ -1828,20 +1755,11 @@ impl BillingStore {
     /// a build with a different bound) can reload an unbounded set.
     pub fn checkouts_load(&self, checkouts: Vec<Checkout>) {
         let now = now_ms();
-        let mut open = HashMap::new();
-        let mut confirmed = HashMap::new();
-        for checkout in checkouts
+        *self.checkouts.write() = checkouts
             .into_iter()
             .filter(|c| now.saturating_sub(c.created_ms) < CHECKOUT_RETENTION_MS)
-        {
-            if checkout.theo_transaction_hash.is_empty() {
-                open.insert(checkout.id.clone(), checkout);
-            } else {
-                confirmed.insert(checkout.id.clone(), checkout);
-            }
-        }
-        *self.checkouts.write() = open;
-        *self.confirmed_theo_checkouts.write() = confirmed;
+            .map(|c| (c.id.clone(), c))
+            .collect();
     }
 
     /// Finalized invoices across all tenants (for persistence).
@@ -2093,7 +2011,7 @@ mod tests {
     fn meter_charges_delta_and_carries_fraction() {
         let s = BillingStore::new();
         s.set_plan("acme", "pro"); // overage plan so balance can go negative
-        // First reading: 0.5¢ worth (below a whole cent) → nothing charged yet.
+                                   // First reading: 0.5¢ worth (below a whole cent) → nothing charged yet.
         let half = UsageTotals {
             active_cpu_ms: (3_600_000.0 * 0.5 / 12.8) as u64,
             ..Default::default()
@@ -2108,11 +2026,10 @@ mod tests {
         let c2 = s.meter_usage("acme", onefive);
         assert!(c2 >= 1, "should charge the crossed whole cent, got {c2}");
         // The usage is recorded in the ledger as a negative "usage" entry.
-        assert!(
-            s.ledger("acme")
-                .iter()
-                .any(|e| e.kind == "usage" && e.amount_cents < 0)
-        );
+        assert!(s
+            .ledger("acme")
+            .iter()
+            .any(|e| e.kind == "usage" && e.amount_cents < 0));
     }
 
     #[test]
@@ -2166,16 +2083,14 @@ mod tests {
         s.meter_usage("acme", u);
         let inv = s.current_invoice("acme");
         assert_eq!(inv.status, "draft");
-        assert!(
-            inv.lines
-                .iter()
-                .any(|l| l.description.contains("subscription"))
-        );
-        assert!(
-            inv.lines
-                .iter()
-                .any(|l| l.description.contains("Compute usage"))
-        );
+        assert!(inv
+            .lines
+            .iter()
+            .any(|l| l.description.contains("subscription")));
+        assert!(inv
+            .lines
+            .iter()
+            .any(|l| l.description.contains("Compute usage")));
         // Pro subscription is $20 = 2000¢; total is subtotal of all lines.
         assert!(inv.total_cents >= 2000);
     }

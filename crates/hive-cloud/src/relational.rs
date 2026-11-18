@@ -92,7 +92,6 @@ const SCHEMA_TABLES: &[(&str, &str)] = &[
         sku TEXT NOT NULL DEFAULT '', \
         target TEXT NOT NULL DEFAULT '', \
         stripe_session_id TEXT NOT NULL DEFAULT '', \
-        theo_transaction_hash TEXT NOT NULL DEFAULT '', \
         created_ms BIGINT NOT NULL\
     )",
     ),
@@ -1697,7 +1696,7 @@ fn build_checkouts_sql(checkouts: &[crate::billing::Checkout]) -> String {
         .iter()
         .map(|co| {
             format!(
-                "({}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
+                "({}, {}, {}, {}, {}, {}, {}, {}, {})",
                 q(&co.id),
                 q(&co.tenant),
                 q(&co.kind),
@@ -1706,19 +1705,18 @@ fn build_checkouts_sql(checkouts: &[crate::billing::Checkout]) -> String {
                 q(&co.sku),
                 q(&co.target),
                 q(&co.stripe_session_id),
-                q(&co.theo_transaction_hash),
                 co.created_ms,
             )
         })
         .collect();
     multi_row_insert(
         "INSERT INTO billing_checkouts (id, tenant, kind, plan, amount_cents, sku, target, \
-         stripe_session_id, theo_transaction_hash, created_ms) VALUES ",
+         stripe_session_id, created_ms) VALUES ",
         &rows,
         "ON CONFLICT (id) DO UPDATE SET tenant = excluded.tenant, kind = excluded.kind, \
          plan = excluded.plan, amount_cents = excluded.amount_cents, sku = excluded.sku, \
          target = excluded.target, stripe_session_id = excluded.stripe_session_id, \
-         theo_transaction_hash = excluded.theo_transaction_hash, created_ms = excluded.created_ms;",
+         created_ms = excluded.created_ms;",
     )
 }
 
@@ -1768,11 +1766,7 @@ async fn reconcile_billing_accounts_schema(
 
 /// `billing_checkouts` columns added after the table first shipped, ALTER-reconciled because
 /// `CREATE TABLE IF NOT EXISTS` never alters an existing table.
-const BILLING_CHECKOUTS_NEW_COLUMNS: &[(&str, &str)] = &[
-    ("sku", "TEXT"),
-    ("target", "TEXT"),
-    ("theo_transaction_hash", "TEXT"),
-];
+const BILLING_CHECKOUTS_NEW_COLUMNS: &[(&str, &str)] = &[("sku", "TEXT"), ("target", "TEXT")];
 
 static BILLING_CHECKOUTS_SCHEMA_RECONCILED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
@@ -2809,7 +2803,6 @@ pub(crate) fn known_tables() -> Vec<SqlTableInfo> {
                 col("sku", "text"),
                 col("target", "text"),
                 col("stripe_session_id", "text"),
-                col("theo_transaction_hash", "text"),
                 col("created_ms", "bigint"),
             ],
         },

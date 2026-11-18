@@ -2,12 +2,11 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Check, CreditCard, Coins, Zap, Loader2, Wallet } from "lucide-react";
+import { Check, CreditCard, Coins, Zap, Loader2 } from "lucide-react";
 import { Card, Button, PageHeader, Badge } from "@/components/ui";
 import { RoleGate } from "@/components/role-gate";
 import { apiSend, usePoll, type BillingInfo, type LedgerEntry, type Invoice } from "@/lib/api";
 import { timeAgo } from "@/lib/utils";
-import { TheoMarketReference } from "@/components/theo-market-reference";
 import { planLabel, planRank } from "@/lib/plan-change";
 
 const BILLING_POLL_MS = 30_000;
@@ -16,11 +15,6 @@ const INVOICES_POLL_MS = 60_000;
 
 function usd(cents: number) {
   return `$${(cents / 100).toFixed(2)}`;
-}
-
-/** THEO-settled nodes (the Autheo deployment) report amounts in hundredths of a THEO. */
-function theo(hundredths: number) {
-  return `${(hundredths / 100).toFixed(2)} THEO`;
 }
 
 export default function BillingPage() {
@@ -74,17 +68,13 @@ function BillingInner() {
 
   const acc = data?.account;
   const plans = data?.plans ?? [];
-  // A node that settles in THEO (wallet-signed) does not report the Stripe flag at all; a USD node always does.
-  const theoMode = !!data && typeof data.stripe !== "boolean";
-  const usd_ = theoMode ? theo : usd;
 
   return (
     <div className="pb-16">
       <PageHeader
         title="Billing"
-        desc={theoMode ? "Manage your THEO-denominated plan, compute credits and usage." : "Manage your plan, compute credits and pay-as-you-go usage."}
+        desc="Manage your plan, compute credits and pay-as-you-go usage."
       />
-      {theoMode && <div className="mb-6"><TheoMarketReference /></div>}
 
       {msg && (
         <div className="mb-5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-600 dark:text-emerald-400">{msg}</div>
@@ -100,17 +90,17 @@ function BillingInner() {
               <div className="flex items-center gap-2">
                 <span className="text-lg font-semibold capitalize">{planLabel(acc.plan)} plan</span>
                 <Badge tone={planRank(acc.plan) >= planRank("pro") ? "blue" : "default"}>{acc.status}</Badge>
-                {theoMode ? <Badge tone="purple">THEO wallet settlement</Badge> : data?.stripe ? <Badge tone="green">Stripe</Badge> : <Badge tone="amber">Mock checkout</Badge>}
+                {data?.stripe ? <Badge tone="green">Stripe</Badge> : <Badge tone="amber">Mock checkout</Badge>}
               </div>
               <div className="mt-1 text-sm text-secondary">
                 Resets {timeAgo(acc.period_end_ms)} · tenant <span className="font-mono">{acc.tenant}</span>
               </div>
             </div>
             <div className="flex gap-8">
-              <Meter label="Included used" value={usd_(acc.used_cents)} sub={`of ${usd_(acc.included_cents)}`} pct={acc.included_cents ? acc.used_cents / acc.included_cents : 0} />
+              <Meter label="Included used" value={usd(acc.used_cents)} sub={`of ${usd(acc.included_cents)}`} pct={acc.included_cents ? acc.used_cents / acc.included_cents : 0} />
               <div>
                 <div className="text-xs text-muted">Credit balance</div>
-                <div className={`text-2xl font-semibold tabular-nums ${acc.balance_cents < 0 ? "text-red-500" : ""}`}>{usd_(acc.balance_cents)}</div>
+                <div className={`text-2xl font-semibold tabular-nums ${acc.balance_cents < 0 ? "text-red-500" : ""}`}>{usd(acc.balance_cents)}</div>
               </div>
             </div>
           </div>
@@ -143,21 +133,10 @@ function BillingInner() {
           {data.rate_card && (
             <div className="mt-5 border-t border-border pt-4 text-xs text-secondary">
               <span className="font-medium text-fg">Usage rate card:</span>{" "}
-              {theoMode ? (
-                <>
-                  {theo(data.rate_card.active_cpu_hr_cents)}/active-CPU-hr ·{" "}
-                  {theo(data.rate_card.mem_gb_hr_cents)}/GB-hr ·{" "}
-                  {theo(data.rate_card.requests_per_million_cents)}/M requests ·{" "}
-                  {theo(data.rate_card.waf_per_million_cents)}/M WAF-blocked
-                </>
-              ) : (
-                <>
-                  ${(data.rate_card.active_cpu_hr_cents / 100).toFixed(3)}/active-CPU-hr ·{" "}
-                  ${(data.rate_card.mem_gb_hr_cents / 100).toFixed(4)}/GB-hr ·{" "}
-                  ${(data.rate_card.requests_per_million_cents / 100).toFixed(2)}/M requests ·{" "}
-                  ${(data.rate_card.waf_per_million_cents / 100).toFixed(2)}/M WAF-blocked
-                </>
-              )}
+              ${(data.rate_card.active_cpu_hr_cents / 100).toFixed(3)}/active-CPU-hr ·{" "}
+              ${(data.rate_card.mem_gb_hr_cents / 100).toFixed(4)}/GB-hr ·{" "}
+              ${(data.rate_card.requests_per_million_cents / 100).toFixed(2)}/M requests ·{" "}
+              ${(data.rate_card.waf_per_million_cents / 100).toFixed(2)}/M WAF-blocked
             </div>
           )}
         </Card>
@@ -175,7 +154,7 @@ function BillingInner() {
                 {current && <Badge tone="blue">Current</Badge>}
               </div>
               <div className="mb-1 text-2xl font-semibold tabular-nums">
-                {p.price_cents === 0 ? "Free" : usd_(p.price_cents)}<span className="text-sm font-normal text-muted">{p.price_cents ? " / mo" : ""}</span>
+                {p.price_cents === 0 ? "Free" : usd(p.price_cents)}<span className="text-sm font-normal text-muted">{p.price_cents ? " / mo" : ""}</span>
               </div>
               <div className="mb-4 min-w-0 break-words text-sm text-secondary">
                 {p.max_projects === 0 ? "Unlimited projects" : `${p.max_projects.toLocaleString("en-US")} projects`}
@@ -210,7 +189,7 @@ function BillingInner() {
         <span className="text-sm text-secondary">Top up pay-as-you-go credits:</span>
         {[1000, 2500, 5000].map((amt) => (
           <Button key={amt} variant="outline" disabled={!!busy} onClick={() => checkout("credits", { amount_cents: amt })}>
-            {theoMode ? <Wallet className="h-4 w-4" /> : <CreditCard className="h-4 w-4" />} Add {usd_(amt)}
+            <CreditCard className="h-4 w-4" /> Add {usd(amt)}
           </Button>
         ))}
       </Card>
@@ -236,18 +215,18 @@ function BillingInner() {
                     {inv.status}
                   </Badge>
                 </span>
-                <span className="tabular-nums font-medium">{usd_(inv.total_cents)}</span>
+                <span className="tabular-nums font-medium">{usd(inv.total_cents)}</span>
               </summary>
               <div className="border-t border-border bg-subtle/30 px-4 py-3">
                 {inv.lines.map((l, i) => (
                   <div key={i} className="flex items-center justify-between py-1 text-sm">
                     <span className="text-secondary">{l.description}</span>
-                    <span className="tabular-nums">{usd_(l.amount_cents)}</span>
+                    <span className="tabular-nums">{usd(l.amount_cents)}</span>
                   </div>
                 ))}
                 <div className="mt-2 flex items-center justify-between border-t border-border pt-2 text-sm font-semibold">
                   <span>Total</span>
-                  <span className="tabular-nums">{usd_(inv.total_cents)}</span>
+                  <span className="tabular-nums">{usd(inv.total_cents)}</span>
                 </div>
               </div>
             </details>
@@ -268,7 +247,7 @@ function BillingInner() {
               <span className="truncate">{l.note}</span>
               <span className="text-xs capitalize text-secondary">{l.kind.replace("_", " ")}</span>
               <span className={`tabular-nums ${l.amount_cents < 0 ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}`}>
-                {l.amount_cents < 0 ? "" : "+"}{usd_(l.amount_cents)}
+                {l.amount_cents < 0 ? "" : "+"}{usd(l.amount_cents)}
               </span>
               <span className="text-muted">{timeAgo(l.ts_ms)}</span>
             </div>

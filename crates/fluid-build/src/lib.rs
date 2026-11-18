@@ -6,7 +6,6 @@
 
 pub mod build_output;
 pub mod deployment_snapshot;
-pub mod devhub_config;
 pub mod framework;
 pub mod nextjs;
 pub mod parser;
@@ -39,10 +38,6 @@ pub use repository_snapshot::{
     GeneratedStep, MetadataInputSeal, PackageManagerSnapshot, ParentPath, RepositoryBuildContract,
     RepositoryBuildSnapshot, RepositoryCoordinates, RepositoryPath, StepAuthority,
     WorkspaceSnapshot,
-};
-pub use devhub_config::{
-    load_devhub_config, load_devhub_config_checked, DevhubBuild, DevhubConfig, DevhubDeploy,
-    DEVHUB_CONFIG_VERSION,
 };
 pub use vercel_config::{
     load_vercel_config, load_vercel_config_checked, ConditionValue, VercelCondition, VercelConfig,

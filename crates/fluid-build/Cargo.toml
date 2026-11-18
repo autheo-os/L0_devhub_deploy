@@ -17,8 +17,6 @@ sha2 = { workspace = true }
 # Strict Cargo.toml [[bin]] detection for the native Rust function lane. Already pinned in
 # Cargo.lock (iroh-relay); no new external package, and toml::Value ignores unknown keys.
 toml = "1"
-# devhub.yml (same version hive-cloud already uses; no new lockfile package)
-serde_yaml = "0.9"
 
 [dev-dependencies]
 # Test-only: the `bun_fixtures` integration test cross-checks a parsed

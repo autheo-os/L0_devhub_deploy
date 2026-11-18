@@ -1,5 +1,5 @@
 import { clerkClient, clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 const isPublic = createRouteMatcher([
   "/",
@@ -44,9 +44,6 @@ const isClerkFree = createRouteMatcher([
 ]);
 
 const bypass = process.env.HIVE_AUTH_BYPASS === "1" && process.env.NODE_ENV !== "production";
-const clerkConfigured =
-  !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY &&
-  !!process.env.CLERK_SECRET_KEY;
 
 const NO_STORE = [
   /^\/account(\/|$)/,
@@ -160,7 +157,7 @@ async function isPlatformOwner(userId: string): Promise<boolean> {
   }
 }
 
-const clerk = clerkConfigured ? clerkMiddleware(async (auth, req) => {
+const clerk = clerkMiddleware(async (auth, req) => {
   if (isAdminRoute(req)) {
     const { userId } = await auth();
     if (!userId || !(await isPlatformOwner(userId))) {
@@ -177,7 +174,7 @@ const clerk = clerkConfigured ? clerkMiddleware(async (auth, req) => {
     await auth.protect({ unauthenticatedUrl: new URL(`/sign-in?redirect_url=${encodeURIComponent(returnTo)}`, publicBase).toString() });
   }
   return withCache(req, NextResponse.next());
-}) : null;
+});
 
 function neutralizeClerkSelfRewrite(req: Request, res: Response): Response {
   const rewrite = res.headers.get("x-middleware-rewrite");
@@ -192,23 +189,10 @@ export const proxy = bypass
   ? corsWrapped((req: Request & { nextUrl: { pathname: string }; method: string }) =>
       withCache(req, NextResponse.next()),
     )
-  : !clerkConfigured
-    ? corsWrapped((req: NextRequest) => {
-        if (isAdminRoute(req)) {
-          if (req.nextUrl.pathname.startsWith("/ops")) {
-            return withCache(req, NextResponse.json({ error: "forbidden" }, { status: 403 }));
-          }
-          return withCache(req, NextResponse.redirect(new URL("/", req.url)));
-        }
-        return withCache(req, NextResponse.next());
-      })
-    : corsWrapped(
-      async (
-        req: Parameters<NonNullable<typeof clerk>>[0],
-        event: Parameters<NonNullable<typeof clerk>>[1],
-      ) => {
+  : corsWrapped(
+      async (req: Parameters<typeof clerk>[0], event: Parameters<typeof clerk>[1]) => {
         if (isClerkFree(req)) return withCache(req, NextResponse.next());
-        const res = await clerk!(req, event);
+        const res = await clerk(req, event);
         return neutralizeClerkSelfRewrite(req, res ?? NextResponse.next());
       },
     );
