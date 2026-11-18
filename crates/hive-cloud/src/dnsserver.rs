@@ -517,7 +517,7 @@ fn lookup(
                     return (rrs, Vec::new(), true, tailored);
                 }
                 16 if qname.starts_with("_acme-challenge.") => {
-                    return (acme_txt_rrs(cloud, qname), Vec::new(), true, false);
+                    return (acme_txt_rrs(cloud, qname), Vec::new(), true, false)
                 }
                 _ => return (Vec::new(), Vec::new(), true, false),
             }
@@ -789,6 +789,12 @@ fn apex_ns_names(cloud: &Arc<CloudState>, require_api: bool) -> Vec<String> {
     names.sort();
     names.dedup();
     names
+}
+
+/// Public handle for the admin roster endpoint (the wizard shows tenants the
+/// exact hostnames to delegate to; private so the filter stays in one place).
+pub fn apex_ns_names_pub(cloud: &Arc<CloudState>) -> Vec<String> {
+    apex_ns_names(cloud, false)
 }
 
 fn apex_ns_rrs(cloud: &Arc<CloudState>, require_api: bool) -> Vec<(u16, u32, Vec<u8>)> {
