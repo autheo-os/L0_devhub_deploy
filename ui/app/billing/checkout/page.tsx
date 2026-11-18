@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Lock, Loader2 } from "lucide-react";
 import { Button, Input } from "@/components/ui";
+import { ComingSoonBadge } from "@/components/coming-soon";
 import { RoleGate } from "@/components/role-gate";
 import { apiGet, apiSend } from "@/lib/api";
 
@@ -100,6 +101,10 @@ function CheckoutInner() {
               {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : `Pay ${usd(co.amount_cents)}`}
             </Button>
             </RoleGate>
+            <div className="mt-3 flex items-center justify-between rounded-md border border-dashed border-border-strong px-3 py-2 text-xs text-secondary">
+              <span>Pay with THEO (crypto)</span>
+              <ComingSoonBadge />
+            </div>
             <button onClick={cancel} className="mt-3 w-full text-center text-xs text-muted hover:text-fg">
               Cancel
             </button>

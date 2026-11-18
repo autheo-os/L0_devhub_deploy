@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ComingSoonBadge } from "@/components/coming-soon";
 import type { Metadata } from "next";
 import { darkViewport, pageMeta } from "@/lib/page-meta";
 import { MarketingShell, MarketingHero, MarketingSection, GlowCard } from "@/components/marketing-shell";
@@ -183,6 +184,9 @@ export default function PricingPage() {
       />
 
       <MarketingSection className="pb-20">
+        <p className="mb-8 flex items-center justify-center gap-2 text-center text-sm text-zinc-400">
+          Pay with THEO (crypto) <ComingSoonBadge className="border-white/20 text-zinc-300" />
+        </p>
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {TIERS.map((tier) => (
             <div

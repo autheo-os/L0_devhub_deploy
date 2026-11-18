@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { PreparingDeployment } from "@/components/clone-animation";
 import Image from "next/image";
 import { DeploymentModelHelp } from "@/components/deployment-model-help";
+import { ComingSoonBadge } from "@/components/coming-soon";
 import { gamePresetById, isSensitiveGameEnv, type GameServerPreset, type GamePresetFields } from "@/lib/game-server-presets";
 
 import { GamesMenu, ConfigureGame } from "@/components/game-hosting";
@@ -583,6 +584,12 @@ export default function NewProjectPage() {
         </Link>
         .
       </p>
+      <div className="mb-8 flex flex-col items-center gap-1.5">
+        <Button variant="outline" disabled aria-disabled="true">
+          <ShieldCheck className="h-4 w-4" /> Deploy from Marketplace
+        </Button>
+        <ComingSoonBadge />
+      </div>
       {error ? <p className="mb-6 text-center text-sm text-red-600">{error}</p> : null}
 
       <div className="grid grid-cols-1 gap-8 md:grid-cols-2">

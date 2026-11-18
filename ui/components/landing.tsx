@@ -12,6 +12,7 @@ import { Bento } from "@/components/landing/bento";
 import { ProductShowcase } from "@/components/landing/product-showcase";
 import { Developer } from "@/components/landing/developer";
 import { UnderTheHood } from "@/components/landing/under-the-hood";
+import { MarketplaceBand } from "@/components/landing/marketplace";
 import { CompareStrip } from "@/components/landing/compare-strip";
 import { ClosingCta } from "@/components/landing/closing-cta";
 import { useReveal } from "@/components/landing/lp-utils";
@@ -33,6 +34,7 @@ export function Landing() {
         <ProductShowcase />
         <Developer />
         <UnderTheHood />
+        <MarketplaceBand />
         <CompareStrip />
         <ClosingCta />
       </div>

@@ -8,6 +8,7 @@ import { useOrganization, useOrganizationList, useClerk } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
 import { Triangle } from "@/components/ui";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ComingSoonBadge } from "@/components/coming-soon";
 import { Logo } from "@/components/logo";
 import { NotificationBell } from "@/components/notifications";
 import { RunNodeControl } from "@/components/run-node-control";
@@ -159,6 +160,9 @@ export function TopNav() {
           )}
           <RunNodeControl />
           <NotificationBell />
+          <span className="hidden items-center gap-1.5 rounded-md border border-dashed border-border-strong px-2.5 py-1 text-xs font-medium text-secondary sm:inline-flex">
+            Marketplace <ComingSoonBadge />
+          </span>
           <ThemeToggle />
           <Link
             href="/account"
